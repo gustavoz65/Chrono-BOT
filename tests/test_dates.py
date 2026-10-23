@@ -87,7 +87,7 @@ def test_ocr_em_c_le_edital_escaneado():
     from ufmt_monitor import ocr
     from ufmt_monitor.extract import pdf_text
     if not ocr.available():
-        pytest.skip("binário ocr/bin/ocr ou pdftoppm ausente")
+        pytest.skip("binário ocr/bin/ufmt-ocr ausente (make -C ocr)")
     data = (Path(__file__).parent / "fixtures" / "edital_escaneado.pdf").read_bytes()
     a = assess("", pdf_text(data), HOJE)
     assert a.status == "prevista" and a.window.label() == "10/11/2026 a 16/11/2026"

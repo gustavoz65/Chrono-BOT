@@ -25,7 +25,8 @@ runs:
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y -qq --no-install-recommends \
-          libtesseract-dev libleptonica-dev tesseract-ocr-por poppler-utils pkg-config
+          libtesseract-dev libleptonica-dev tesseract-ocr-por \
+          libpoppler-glib-dev libcairo2-dev libprotobuf-c-dev pkg-config
         make -C ocr
 
     - if: inputs.browser == 'true'

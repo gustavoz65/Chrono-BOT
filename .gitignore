@@ -6,3 +6,5 @@ __pycache__/
 monitor.db
 node_modules/
 ocr/bin/
+ocr/build/
+ai/bin/

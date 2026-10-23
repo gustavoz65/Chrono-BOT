@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+// Contrato entre o orquestrador de IA (Go) e os workers de cada linguagem.
+// Cada worker é um executável: lê um Request serializado no stdin até EOF e
+// escreve um Response serializado no stdout. Logs vão para o stderr.
+package ufmt.v1;
+
+option go_package = "github.com/gustavoz65/Chrono-BOT/ai/gen/ufmtv1;ufmtv1";
+
+message Request {
+  oneof payload {
+    OcrRequest ocr = 1;
+    RenderRequest render = 2;
+    ExtractRequest extract = 3;
+    FetchRequest fetch = 4;
+    AnalyzeRequest analyze = 5;
+  }
+}
+
+message Response {
+  oneof payload {
+    OcrResponse ocr = 1;
+    RenderResponse render = 2;
+    ExtractResponse extract = 3;
+    FetchResponse fetch = 4;
+    AnalyzeResponse analyze = 5;
+  }
+  Error error = 15;
+}
+
+message Error {
+  enum Code {
+    CODE_UNSPECIFIED = 0;
+    CODE_INVALID_REQUEST = 1;
+    CODE_UNSUPPORTED = 2;
+    CODE_UNAVAILABLE = 3;
+    CODE_INTERNAL = 4;
+  }
+  Code code = 1;
+  string message = 2;
+}
+
+// C (ocr/): reconhecimento de texto de PDF escaneado ou imagem.
+message OcrRequest {
+  oneof source {
+    bytes pdf = 1;
+    string path = 2;
+  }
+  string lang = 3;
+  int32 first_page = 4;
+  int32 last_page = 5;
+  int32 dpi = 6;
+}
+
+message OcrPage {
+  int32 number = 1;
+  string text = 2;
+  int32 confidence = 3;
+}
+
+message OcrResponse {
+  repeated OcrPage pages = 1;
+}
+
+// JavaScript (browser/): páginas renderizadas num Chromium headless.
+message RenderRequest {
+  repeated string urls = 1;
+  bool discover_filters = 2;
+  int32 timeout_ms = 3;
+}
+
+message FilterOption {
+  string select = 1;
+  string value = 2;
+  string label = 3;
+  string url = 4;
+}
+
+message RenderedPage {
+  string url = 1;
+  string final_url = 2;
+  string html = 3;
+  string text = 4;
+  repeated FilterOption options = 5;
+  string error = 6;
+}
+
+message RenderResponse {
+  repeated RenderedPage pages = 1;
+}
+
+// Python (ufmt_monitor/): regras determinísticas e leitura de documentos.
+message ExtractRequest {
+  string title = 1;
+  string text = 2;
+  string today = 3;
+}
+
+message InscriptionWindow {
+  string start = 1;
+  string end = 2;
+  string status = 3;
+  string context = 4;
+}
+
+message ExtractResponse {
+  string modalidade = 1;
+  string status = 2;
+  repeated InscriptionWindow windows = 3;
+  repeated string dates = 4;
+  bool computacao = 5;
+  bool computacao_cuiaba = 6;
+  int32 vagas_cc = 7;
+}
+
+message FetchRequest {
+  string url = 1;
+}
+
+message Check {
+  string name = 1;
+  // "ok", "falhou" ou "nao_executada".
+  string result = 2;
+  string detail = 3;
+}
+
+message FetchResponse {
+  string text = 1;
+  repeated string sources = 2;
+  repeated Check checks = 3;
+}
+
+// Go (ai/): análise de uma publicação com IA (Genkit + Groq) e tools.
+message AnalyzeRequest {
+  string title = 1;
+  string url = 2;
+  string body = 3;
+  string today = 4;
+}
+
+message Analysis {
+  string modalidade = 1;
+  string inscricao_inicio = 2;
+  string inscricao_fim = 3;
+  string status = 4;
+  bool oferece_ciencia_computacao = 5;
+  bool ciencia_computacao_cuiaba = 6;
+  int32 vagas_ciencia_computacao_cuiaba = 7;
+  string resumo = 8;
+  string evidencia = 9;
+}
+
+message AnalyzeResponse {
+  Analysis analysis = 1;
+  string model = 2;
+  repeated string tools_used = 3;
+}
