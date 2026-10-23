@@ -8,3 +8,4 @@ node_modules/
 ocr/bin/
 ocr/build/
 ai/bin/
+.task/
