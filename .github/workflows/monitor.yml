@@ -14,10 +14,10 @@ concurrency:
 
 jobs:
   monitor:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: ./.github/actions/setup
         with:
@@ -31,6 +31,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           HEARTBEAT_DAYS: ${{ vars.HEARTBEAT_DAYS || '7' }}
           BROWSER: ${{ vars.BROWSER || '1' }}
+          OCR_VERIFY_PAGES: ${{ vars.OCR_VERIFY_PAGES || '3' }}
         run: python -m ufmt_monitor run
 
       - name: Salvar estado
