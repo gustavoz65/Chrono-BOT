@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import json
-import logging
 import os
 import shutil
-import subprocess
 
+from . import workers
 from .config import ROOT
+from .gen.ufmt.v1 import worker_pb2 as pb
 
-log = logging.getLogger(__name__)
-
-SCRIPT = ROOT / "browser" / "render.mjs"
+CLI = ROOT / "browser" / "src" / "cli.js"
 
 
 def available() -> bool:
@@ -22,8 +19,13 @@ def available() -> bool:
 
 
 def render(url: str, discover: bool = False, timeout_s: int = 180) -> dict:
-    cmd = ["node", str(SCRIPT), url, "--timeout", "45000"] + (["--discover"] if discover else [])
-    proc = subprocess.run(cmd, capture_output=True, timeout=timeout_s, cwd=SCRIPT.parent)
-    if proc.returncode != 0:
-        raise RuntimeError(f"navegador falhou: {proc.stderr.decode(errors='replace')[:300]}")
-    return json.loads(proc.stdout)
+    request = pb.Request(render=pb.RenderRequest(urls=[url], discover_filters=discover, timeout_ms=45000))
+    response = workers.call("browser", ["node", str(CLI), "--worker"], request, timeout=timeout_s, cwd=CLI.parent)
+    page = response.render.pages[0]
+    if page.error:
+        raise workers.WorkerError("browser", page.error)
+    return {
+        "url": page.final_url or url,
+        "html": page.html,
+        "options": [{"select": o.select, "value": o.value, "label": o.label, "url": o.url} for o in page.options],
+    }

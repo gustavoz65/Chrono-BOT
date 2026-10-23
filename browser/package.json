@@ -2,15 +2,22 @@
   "name": "ufmt-monitor-browser",
   "private": true,
   "type": "module",
-  "description": "Renderiza páginas da UFMT num Chromium headless quando o HTML puro não basta.",
+  "description": "Worker de navegador (Chromium headless) do monitor UFMT: renderiza páginas e descobre filtros.",
+  "exports": "./src/index.js",
+  "bin": {
+    "ufmt-browser": "src/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {
-    "@bufbuild/protobuf": "^2.9.0",
+    "@bufbuild/protobuf": "2.9.0",
     "playwright": "1.56.1"
   },
   "devDependencies": {
-    "@bufbuild/protoc-gen-es": "^2.9.0"
+    "@bufbuild/protoc-gen-es": "2.9.0"
   }
 }

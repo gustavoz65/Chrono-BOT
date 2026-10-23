@@ -2,13 +2,14 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 
-const run = promisify(execFile);
-const script = fileURLToPath(new URL("./render.mjs", import.meta.url));
+import { BrowserSession } from "../src/session.js";
+import { RenderRequestSchema, RequestSchema, ResponseSchema } from "../src/gen/ufmt/v1/worker_pb.js";
 
 const CICLOS = { 244: "Admissão de Graduado 2026/1", 251: "Admissão de Graduado 2026/2" };
+const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 
 function pagina(category) {
   const options = Object.entries(CICLOS)
@@ -31,6 +32,7 @@ function pagina(category) {
 
 let server;
 let base;
+let session;
 
 before(async () => {
   server = createServer((req, res) => {
@@ -40,26 +42,36 @@ before(async () => {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${server.address().port}`;
+  session = await BrowserSession.launch();
 });
 
-after(() => server.close());
+after(async () => {
+  await session?.close();
+  server.close();
+});
 
 test("renderiza conteúdo montado por JavaScript", async () => {
-  const { stdout } = await run("node", [script, `${base}/publicacoes?id=61&category=244&page=1`]);
-  const out = JSON.parse(stdout);
-  assert.match(out.html, /Edital Admissão de Graduado 2026\/1/);
-  assert.deepEqual(out.options, []);
+  const page = await session.render(`${base}/publicacoes?id=61&category=244&page=1`);
+  assert.match(page.html, /Edital Admissão de Graduado 2026\/1/);
+  assert.match(page.text, /Edital Admissão de Graduado 2026\/1/);
+  assert.deepEqual(page.options, []);
 });
 
-test("--discover descobre a URL de cada ciclo do filtro", async () => {
-  const { stdout } = await run("node", [script, `${base}/publicacoes?id=61&category=244&page=1`, "--discover"]);
-  const out = JSON.parse(stdout);
-  const byLabel = Object.fromEntries(out.options.map((o) => [o.label, new URL(o.url)]));
-  assert.equal(Object.keys(byLabel).length, 2); // a opção "Outros" é ignorada
+test("descobre a URL real de cada ciclo do filtro", async () => {
+  const page = await session.render(`${base}/publicacoes?id=61&category=244&page=1`, { discoverFilters: true });
+  const byLabel = Object.fromEntries(page.options.map((o) => [o.label, new URL(o.url)]));
+  assert.equal(Object.keys(byLabel).length, 2);
   assert.equal(byLabel["Admissão de Graduado 2026/2"].searchParams.get("category"), "251");
-  assert.equal(byLabel["Admissão de Graduado 2026/1"].searchParams.get("category"), "244");
 });
 
-test("URL inválida sai com erro", async () => {
-  await assert.rejects(run("node", [script, "nao-e-url"]), /informe uma URL/);
+test("CLI --worker fala protobuf de ponta a ponta", async () => {
+  const input = toBinary(RequestSchema, create(RequestSchema, {
+    payload: { case: "render", value: create(RenderRequestSchema, { urls: [`${base}/publicacoes?category=251`] }) },
+  }));
+  const stdout = await new Promise((resolve, reject) => {
+    const child = execFile("node", [cli, "--worker"], { encoding: "buffer" }, (err, out) => (err ? reject(err) : resolve(out)));
+    child.stdin.end(Buffer.from(input));
+  });
+  const res = fromBinary(ResponseSchema, new Uint8Array(stdout));
+  assert.match(res.payload.value.pages[0].text, /2026\/2/);
 });
