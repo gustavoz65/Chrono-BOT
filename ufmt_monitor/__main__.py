@@ -91,7 +91,7 @@ def cmd_analyze(args) -> int:
     doc = Fetcher().document(args.url)
     heuristic = assess("", doc.text, today)
     heuristic.checks = doc.checks
-    result = llm.refine("", doc.text, heuristic, today)
+    result = llm.refine("", doc.text, heuristic, today, args.url)
     print(f"Lido de: {doc.sources}")
     print(f"Confiança: {result.confidence}")
     for c in merge(result.checks):

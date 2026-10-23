@@ -124,7 +124,7 @@ def analyze(fetcher: Fetcher, link: Link, source: Source, today: date,
     result.checks = checks
     if source.kind == "listing" and result.modalidade == "outro" and source.modalidade:
         result.modalidade = source.modalidade
-    result = llm.refine(link.text, body, result, today)
+    result = llm.refine(link.text, body, result, today, link.url)
     return Publication(link.text, link.url, source, result, read_from, error)
 
 

@@ -17,10 +17,11 @@ class WorkerError(RuntimeError):
         self.code = code
 
 
-def call(worker: str, cmd: list[str], request: pb.Request, timeout: float, cwd: Path | None = None) -> pb.Response:
+def call(worker: str, cmd: list[str], request: pb.Request, timeout: float, cwd: Path | None = None,
+         env: dict[str, str] | None = None) -> pb.Response:
     try:
         proc = subprocess.run(cmd, input=request.SerializeToString(), capture_output=True,
-                              timeout=timeout, cwd=cwd)
+                              timeout=timeout, cwd=cwd, env=env)
     except FileNotFoundError as exc:
         raise WorkerError(worker, f"executável não encontrado ({exc.filename})") from exc
     except subprocess.TimeoutExpired as exc:

@@ -1,0 +1,134 @@
+version: "3"
+
+vars:
+  PYTHON: '{{.PYTHON | default "python3"}}'
+
+env:
+  PYTHON: "{{.PYTHON}}"
+
+tasks:
+  default:
+    desc: Lista os atalhos
+    cmds:
+      - task --list
+    silent: true
+
+  setup:
+    desc: Instala dependências de todos os módulos (Python, Node, Go) e compila
+    cmds:
+      - "{{.PYTHON}} -m pip install -r requirements-dev.txt"
+      - npm --prefix browser ci
+      - npm --prefix browser exec -- playwright install chromium
+      - task: build
+
+  proto:
+    desc: Regenera o código do contrato protobuf nas 4 linguagens
+    cmds:
+      - make proto PYTHON={{.PYTHON}}
+
+  build:
+    desc: Compila o OCR (C) e o agente de IA (Go)
+    deps: [build:ocr, build:ai]
+
+  build:ocr:
+    desc: Compila o módulo C de OCR
+    sources: [ocr/src/**/*.c, ocr/src/**/*.h, ocr/include/**/*.h, ocr/gen/**/*, ocr/Makefile]
+    generates: [ocr/bin/ufmt-ocr]
+    cmds:
+      - make -C ocr
+
+  build:ai:
+    desc: Compila o agente de IA em Go
+    dir: ai
+    sources: ["**/*.go", go.mod, go.sum]
+    generates: [bin/ufmt-ai]
+    cmds:
+      - go build -o bin/ufmt-ai ./cmd/ufmt-ai
+
+  run:
+    desc: Executa o monitor (envia ao Telegram se configurado)
+    deps: [build]
+    cmds:
+      - "{{.PYTHON}} -m ufmt_monitor run"
+
+  run:dry:
+    desc: Executa o monitor sem enviar nada ao Telegram
+    deps: [build]
+    cmds:
+      - "{{.PYTHON}} -m ufmt_monitor run --dry-run"
+
+  check:
+    desc: Valida as fontes oficiais e mostra o que o scraper enxerga
+    deps: [build]
+    cmds:
+      - "{{.PYTHON}} -m ufmt_monitor check"
+
+  analyze:
+    desc: "Analisa um edital com a IA. Uso: task analyze -- <url> [--today AAAA-MM-DD]"
+    deps: [build]
+    cmds:
+      - "{{.PYTHON}} -m ufmt_monitor analyze {{.CLI_ARGS}}"
+
+  ai:
+    desc: "Roda o agente Go direto num arquivo de texto. Uso: task ai -- -file edital.txt -title 'Edital'"
+    deps: [build:ai]
+    cmds:
+      - ai/bin/ufmt-ai analyze {{.CLI_ARGS}}
+
+  ocr:
+    desc: "OCR de um PDF ou imagem. Uso: task ocr -- arquivo.pdf"
+    deps: [build:ocr]
+    cmds:
+      - ocr/bin/ufmt-ocr {{.CLI_ARGS}}
+
+  render:
+    desc: "Abre uma página no navegador headless. Uso: task render -- <url> [--discover]"
+    cmds:
+      - node browser/src/cli.js render {{.CLI_ARGS}}
+
+  telegram:test:
+    desc: Envia uma mensagem de teste ao Telegram
+    cmds:
+      - "{{.PYTHON}} -m ufmt_monitor test-telegram"
+
+  test:
+    desc: Roda os testes de todos os módulos
+    deps: [build]
+    cmds:
+      - task: test:go
+      - task: test:c
+      - task: test:js
+      - task: test:py
+
+  test:go:
+    desc: Testes do agente de IA (Go)
+    dir: ai
+    cmds:
+      - go vet ./...
+      - go test ./...
+
+  test:c:
+    desc: Testes do OCR (C)
+    cmds:
+      - make -C ocr test
+
+  test:c:asan:
+    desc: Testes do OCR com AddressSanitizer e UBSan
+    cmds:
+      - make -C ocr asan
+
+  test:js:
+    desc: Testes do navegador (JavaScript)
+    dir: browser
+    cmds:
+      - npm test
+
+  test:py:
+    desc: Testes do monitor (Python)
+    cmds:
+      - "{{.PYTHON}} -m pytest"
+
+  clean:
+    desc: Remove binários e artefatos de build
+    cmds:
+      - make clean

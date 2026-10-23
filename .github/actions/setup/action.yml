@@ -5,7 +5,7 @@ inputs:
     description: Instalar Node + Chromium para páginas montadas por JavaScript
     default: "true"
   ocr:
-    description: Instalar Tesseract e compilar ocr/ocr.c para PDFs escaneados
+    description: Instalar Tesseract e compilar o módulo C de OCR
     default: "true"
 runs:
   using: composite
@@ -18,6 +18,15 @@ runs:
     - name: Dependências Python
       shell: bash
       run: pip install -r requirements-dev.txt
+
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: ai/go.mod
+        cache-dependency-path: ai/go.sum
+    - name: Agente de IA (Go + Genkit)
+      shell: bash
+      working-directory: ai
+      run: go build -o bin/ufmt-ai ./cmd/ufmt-ai
 
     - if: inputs.ocr == 'true'
       name: OCR (Tesseract + binário C)

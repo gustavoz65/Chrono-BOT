@@ -49,25 +49,51 @@ atual (2026/1, inscrições de 23 a 28/06/2026) resulta em **encerrado**, como e
 
 ## Arquitetura
 
+Quatro módulos, um contrato. O **agente de IA em Go** (Genkit + Groq) é o centro: o modelo decide
+quando chamar *tools*, e cada tool executa código Go ou um módulo de outra linguagem. Não há
+servidores: cada módulo é um executável que recebe um `Request` protobuf no stdin e devolve um
+`Response` no stdout, e o Go os executa com `os/exec`.
+
 ```
-ufmt_monitor/          Python: orquestração, scraping, classificação, Telegram
-  monitor.py           compara com o estado anterior e decide o que avisar
-  verify.py            verificação cruzada e nível de confiança
-  extract.py           HTML/PDF sem seletores frágeis (cards com data, menus, filtros)
-  dates.py             datas em português e períodos de inscrição
-  classify.py          modalidade, status, relevância, vagas de Computação
-  llm.py               (opcional) IA do Groq como segunda leitura dos editais
-  browser.py / ocr.py  pontes para os módulos abaixo
-browser/render.mjs     JavaScript puro + Playwright: renderiza páginas montadas por JS e
-                       descobre a URL de cada opção do filtro "Ano"
-ocr/ocr.c              C + API do Tesseract: lê PDFs escaneados (editais em imagem)
+                     proto/ufmt/v1/worker.proto   (contrato único, gerado com protoc)
+                                   │
+  Python (monitor) ── exec ──▶  Go: ufmt-ai  (Genkit + plugin Groq)
+                                   │  tools que o modelo chama:
+                                   ├─ buscar_no_documento, ler_trecho, situacao_inscricao  (Go)
+                                   ├─ extrair_regras, ler_publicacao ── exec ──▶ Python worker
+                                   ├─ renderizar_pagina ─────────────── exec ──▶ JS worker (Chromium)
+                                   └─ ocr_pdf ───────────────────────── exec ──▶ C worker (Tesseract)
+```
+
+| Módulo | Pasta | O que faz | Entrada como worker |
+|---|---|---|---|
+| Go | `ai/` | agente Genkit, plugin Groq, tools, execução dos workers | `ai/bin/ufmt-ai --worker` |
+| Python | `ufmt_monitor/` | monitor, scraping, regras de datas, verificação cruzada, Telegram | `python -m ufmt_monitor.worker` |
+| JavaScript | `browser/` | Chromium headless: renderiza páginas e descobre os filtros "Ano" | `node browser/src/cli.js --worker` |
+| C | `ocr/` | OCR de PDF/imagem: poppler renderiza, Tesseract reconhece | `ocr/bin/ufmt-ocr --worker` |
+
+```
+ai/
+  cmd/ufmt-ai/         executável (modo worker e modo linha de comando)
+  groq/                plugin Genkit para o Groq (API compatível com OpenAI)
+  internal/agent/      agente: prompt, tools, normalização da resposta
+  internal/workers/    execução dos módulos das outras linguagens
+ocr/
+  include/ufmt_ocr.h   API pública da biblioteca
+  src/                 biblioteca (ocr.c), worker protobuf (worker.c) e CLI (main.c)
+  tests/               testes, inclusive com AddressSanitizer/UBSan
+browser/
+  src/                 sessão do navegador, filtros, worker protobuf, CLI
+  test/                unidade, protocolo e integração com Chromium real
+ufmt_monitor/          monitor (Python); worker.py é a entrada protobuf
+proto/                 contrato .proto; o código gerado fica em */gen
 sources.toml           fontes monitoradas (edite aqui)
 state/state.json       estado (o workflow faz commit só quando algo muda)
 ```
 
-Navegador, OCR e Groq rodam junto com a leitura HTTP para **confirmar** cada leitura (veja
-"Verificação cruzada"). Se algum deles não estiver disponível, o bot continua funcionando, mas
-a confiança dos alertas cai para "média".
+Segurança: as tools que acessam a rede só aceitam endereços da UFMT (`*.ufmt.br`), então um texto
+malicioso dentro de um edital não consegue fazer a IA acessar outros sites. O conteúdo dos
+documentos é tratado como dado, nunca como instrução.
 
 ## Colocar no ar (GitHub Actions)
 
@@ -78,7 +104,7 @@ a confiança dos alertas cai para "média".
 3. No repositório: **Settings → Secrets and variables → Actions → New repository secret**:
    - `TELEGRAM_BOT_TOKEN`
    - `TELEGRAM_CHAT_ID` (pode ser mais de um, separados por vírgula)
-   - `GROQ_API_KEY` *(opcional: ativa a segunda leitura dos editais pela IA do Groq; crie a chave em console.groq.com)*
+   - `GROQ_API_KEY` *(opcional: ativa o agente de IA em Go; crie a chave em console.groq.com)*
 4. Faça merge na branch padrão (o agendamento do GitHub só roda na branch padrão).
 5. Em **Actions → Validar fontes → Run workflow**, marque *test_telegram*. Você deve receber a
    mensagem de teste, e o resumo da execução mostra o que o scraper encontrou em cada fonte:
@@ -104,24 +130,32 @@ passar do limite. Nesse caso, mude o `cron` para `7 */2 * * *` ou desligue `OCR`
 
 ## Rodar localmente
 
+Pré-requisitos: Python 3.12+, Node 20+, Go 1.25+, [Task](https://taskfile.dev) e, para o OCR
+(Debian/Ubuntu):
+
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
-
-# opcional: navegador
-(cd browser && npm ci && npx playwright install chromium)
-# opcional: OCR (Debian/Ubuntu)
-sudo apt-get install libtesseract-dev libleptonica-dev tesseract-ocr-por poppler-utils
-make -C ocr
-
-python -m ufmt_monitor check                 # valida as fontes e mostra o que foi extraído
-python -m ufmt_monitor run --dry-run         # execução completa sem enviar ao Telegram
-python -m ufmt_monitor analyze <url-do-edital> --today 2026-06-25   # testa um edital
-python -m ufmt_monitor test-telegram         # precisa de TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID
-
-python -m pytest                             # testes Python (inclui OCR real se compilado)
-(cd browser && npm test)                     # testes do navegador
+sudo apt-get install libtesseract-dev libleptonica-dev tesseract-ocr-por \
+  libpoppler-glib-dev libcairo2-dev libprotobuf-c-dev pkg-config
 ```
+
+Atalhos (`task --list` mostra todos):
+
+| Atalho | O que faz |
+|---|---|
+| `task setup` | instala dependências de todos os módulos e compila |
+| `task build` | compila o OCR (C) e o agente de IA (Go) |
+| `task test` | testes de Go, C, JavaScript e Python |
+| `task run:dry` | executa o monitor sem enviar nada ao Telegram |
+| `task run` | executa o monitor de verdade |
+| `task check` | valida as fontes oficiais e mostra o que o scraper enxerga |
+| `task analyze -- <url>` | analisa um edital com a IA |
+| `task ai -- -file edital.txt` | roda o agente Go direto num texto |
+| `task ocr -- arquivo.pdf` | OCR de um PDF ou imagem |
+| `task render -- <url> --discover` | abre a página no navegador e descobre os filtros |
+| `task proto` | regenera o código do contrato nas 4 linguagens |
+| `task telegram:test` | manda uma mensagem de teste |
+
+Use `PYTHON=.venv/bin/python task ...` se o Python do projeto não for o `python3` do sistema.
 
 ## Adicionar ou ajustar fontes
 
