@@ -1,0 +1,12 @@
+{
+  "name": "ufmt-monitor-browser",
+  "private": true,
+  "type": "module",
+  "description": "Renderiza páginas da UFMT num Chromium headless quando o HTML puro não basta.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "playwright": "1.56.1"
+  }
+}
