@@ -28,9 +28,10 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           HEARTBEAT_DAYS: ${{ vars.HEARTBEAT_DAYS || '7' }}
           BROWSER: ${{ vars.BROWSER || '1' }}
+          GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
           OCR_VERIFY_PAGES: ${{ vars.OCR_VERIFY_PAGES || '3' }}
         run: python -m ufmt_monitor run
 

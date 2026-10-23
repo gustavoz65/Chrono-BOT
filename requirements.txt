@@ -1,5 +1,4 @@
 requests>=2.32,<3
 beautifulsoup4>=4.12,<5
 pypdf>=5,<7
-# Opcional: só é usado se ANTHROPIC_API_KEY estiver definida.
-anthropic>=2.2,<3
+groq>=1.7,<2

@@ -40,6 +40,6 @@ def fixture_text():
 @pytest.fixture(autouse=True)
 def no_external_services(monkeypatch):
     monkeypatch.setenv("BROWSER", "0")
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)

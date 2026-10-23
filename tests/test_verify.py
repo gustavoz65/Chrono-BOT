@@ -59,7 +59,7 @@ def test_leituras_que_batem_aparecem_no_alerta(fixture_text):
     tg = run_with_browser(fixture_text, st, listing, listing, extra)
     msg = tg.sent[0]
     assert "HTML×navegador ✔" in msg and "página×navegador ✔" in msg
-    assert "Confiança: média" in msg            # Claude não configurado no teste
+    assert "Confiança: média" in msg            # Groq não configurado no teste
     assert st["sources"]["lista"]["verification"]["ok"] is True
 
 

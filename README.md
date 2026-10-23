@@ -26,7 +26,7 @@ documento informa, **quantas vagas de Ciência da Computação em Cuiabá** exis
 Cada leitura é confirmada por um método independente. O alerta mostra o resultado:
 
 ```
-🔒 Confiança: alta — HTML×navegador ✔ · página×navegador ✔ · texto×OCR ✔ · heurística×Claude ✔
+🔒 Confiança: alta — HTML×navegador ✔ · página×navegador ✔ · texto×OCR ✔ · heurística×Groq ✔
 ```
 
 | Verificação | O que compara |
@@ -34,10 +34,10 @@ Cada leitura é confirmada por um método independente. O alerta mostra o result
 | **HTML×navegador** | publicações e ciclos lidos via HTTP × lidos no Chromium (JS executado) |
 | **página×navegador** | texto da página da publicação via HTTP × renderizada |
 | **texto×OCR** | camada de texto do PDF × OCR em C das primeiras páginas (conteúdo e período de inscrição) |
-| **heurística×Claude** | período de inscrição extraído pelo código × extraído pelo Claude |
+| **heurística×Groq** | período de inscrição extraído pelo código × extraído pela IA do Groq |
 
 - **alta**: todas as verificações bateram. **média**: alguma não pôde rodar (ex.: sem chave do
-  Claude ou PDF escaneado, que só o OCR lê). **baixa**: alguma leitura divergiu, e o alerta mostra
+  Groq ou PDF escaneado, que só o OCR lê). **baixa**: alguma leitura divergiu, e o alerta mostra
   o quê.
 - Em caso de divergência, o bot **não descarta nada**: usa a união das leituras e prioriza
   "inscrição aberta", para nunca perder um prazo. Se a divergência persistir em duas execuções
@@ -56,7 +56,7 @@ ufmt_monitor/          Python: orquestração, scraping, classificação, Telegr
   extract.py           HTML/PDF sem seletores frágeis (cards com data, menus, filtros)
   dates.py             datas em português e períodos de inscrição
   classify.py          modalidade, status, relevância, vagas de Computação
-  llm.py               (opcional) Claude como segunda opinião em editais ambíguos
+  llm.py               (opcional) IA do Groq como segunda leitura dos editais
   browser.py / ocr.py  pontes para os módulos abaixo
 browser/render.mjs     JavaScript puro + Playwright: renderiza páginas montadas por JS e
                        descobre a URL de cada opção do filtro "Ano"
@@ -65,7 +65,7 @@ sources.toml           fontes monitoradas (edite aqui)
 state/state.json       estado (o workflow faz commit só quando algo muda)
 ```
 
-Navegador, OCR e Claude rodam junto com a leitura HTTP para **confirmar** cada leitura (veja
+Navegador, OCR e Groq rodam junto com a leitura HTTP para **confirmar** cada leitura (veja
 "Verificação cruzada"). Se algum deles não estiver disponível, o bot continua funcionando, mas
 a confiança dos alertas cai para "média".
 
@@ -78,7 +78,7 @@ a confiança dos alertas cai para "média".
 3. No repositório: **Settings → Secrets and variables → Actions → New repository secret**:
    - `TELEGRAM_BOT_TOKEN`
    - `TELEGRAM_CHAT_ID` (pode ser mais de um, separados por vírgula)
-   - `ANTHROPIC_API_KEY` *(opcional: ativa a leitura de editais pelo Claude)*
+   - `GROQ_API_KEY` *(opcional: ativa a segunda leitura dos editais pela IA do Groq; crie a chave em console.groq.com)*
 4. Faça merge na branch padrão (o agendamento do GitHub só roda na branch padrão).
 5. Em **Actions → Validar fontes → Run workflow**, marque *test_telegram*. Você deve receber a
    mensagem de teste, e o resumo da execução mostra o que o scraper encontrou em cada fonte:
@@ -96,6 +96,7 @@ a confiança dos alertas cai para "média".
 | `OCR` | `1` | `0` desliga o OCR (sem verificação texto×OCR) |
 | `HEARTBEAT_DAYS` | `7` | dias entre mensagens "funcionando" (`0` desliga) |
 | `OCR_VERIFY_PAGES` | `3` | páginas de cada PDF conferidas por OCR |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | modelo do Groq usado na segunda leitura |
 
 **Custo do Actions:** em repositório **público** é grátis e ilimitado. Em repositório **privado**
 o plano grátis tem 2.000 min/mês; cada execução leva de 1 a 2 min, então de hora em hora pode

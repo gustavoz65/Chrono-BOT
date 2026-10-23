@@ -29,7 +29,7 @@ def cmd_check(args) -> int:
     fetcher, today = Fetcher(), date.today()
     report = ["# Validação das fontes UFMT", f"Data: {today.isoformat()}",
               f"Navegador: {'sim' if browser.available() else 'não'} · OCR: {'sim' if ocr.available() else 'não'}"
-              f" · Claude: {'sim' if llm.enabled() else 'não'}", ""]
+              f" · Groq: {'sim' if llm.enabled() else 'não'}", ""]
     critical_failed = False
     for source in load_sources(args.sources):
         report.append(f"## {source.name}\n`{source.url}` — tipo `{source.kind}`")
