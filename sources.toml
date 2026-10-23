@@ -1,0 +1,41 @@
+# kind: "listing" = toda publicação nova avisa | "page" = só o que fala dos processos de ingresso
+
+[[source]]
+id = "ingresso-publicacoes-graduado"
+name = "Central de Ingresso — Publicações de Admissão de Graduado"
+url = "https://www.ufmt.br/unidade/ingresso/publicacoes?id=61&category=244&page=1"
+kind = "listing"
+critical = true
+min_items = 1
+modalidade = "admissao_graduados"
+
+[[source]]
+id = "ingresso-home"
+name = "Central de Ingresso — Página inicial"
+url = "https://www.ufmt.br/unidade/ingresso"
+kind = "page"
+critical = true
+
+[[source]]
+id = "ingresso-sobre-graduado"
+name = "Central de Ingresso — Sobre Admissão de Graduado"
+url = "https://www.ufmt.br/unidade/ingresso/pagina/admissao-de-graduado/3194"
+kind = "page"
+
+[[source]]
+id = "sistema-graduado-legado"
+name = "Sistema de Admissão de Graduado (legado)"
+url = "https://sistemas.ufmt.br/ufmt.graduado2014/Secao/Index/130"
+kind = "page"
+
+[[source]]
+id = "ic-graduacao"
+name = "Instituto de Computação — Graduação"
+url = "https://www.ic.ufmt.br/graduacao/"
+kind = "page"
+
+[[source]]
+id = "fct-noticias"
+name = "Faculdade de Ciência e Tecnologia — Notícias"
+url = "https://fct.ufmt.br/noticias-direcao/"
+kind = "page"
