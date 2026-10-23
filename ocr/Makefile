@@ -35,6 +35,7 @@ test: bin/test_ocr bin/ufmt-ocr
 asan:
 	$(MAKE) clean
 	$(MAKE) test CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
+	$(MAKE) clean
 
 build bin:
 	mkdir -p $@
