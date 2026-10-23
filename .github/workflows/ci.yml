@@ -1,0 +1,22 @@
+name: Testes
+
+on:
+  push:
+    paths-ignore: ["state/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Testes Python (inclui OCR real em C)
+        run: python -m pytest -v
+      - name: Testes do navegador (JavaScript)
+        working-directory: browser
+        run: npm test

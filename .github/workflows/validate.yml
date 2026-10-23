@@ -1,0 +1,36 @@
+name: Validar fontes
+
+on:
+  workflow_dispatch:
+    inputs:
+      telegram:
+        description: Enviar o relatório também pelo Telegram
+        type: boolean
+        default: false
+      test_telegram:
+        description: Enviar uma mensagem de teste pelo Telegram
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Testar Telegram
+        if: inputs.test_telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m ufmt_monitor test-telegram
+      - name: Validar fontes oficiais (relatório no resumo da execução)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -m ufmt_monitor check ${{ inputs.telegram && '--telegram' || '' }}

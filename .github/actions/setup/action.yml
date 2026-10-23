@@ -1,0 +1,43 @@
+name: Preparar ambiente do monitor
+description: Python + dependências; opcionalmente navegador (Playwright) e OCR (Tesseract + binário C).
+inputs:
+  browser:
+    description: Instalar Node + Chromium para páginas montadas por JavaScript
+    default: "true"
+  ocr:
+    description: Instalar Tesseract e compilar ocr/ocr.c para PDFs escaneados
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: pip
+        cache-dependency-path: requirements*.txt
+    - name: Dependências Python
+      shell: bash
+      run: pip install -r requirements-dev.txt
+
+    - if: inputs.ocr == 'true'
+      name: OCR (Tesseract + binário C)
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq --no-install-recommends \
+          libtesseract-dev libleptonica-dev tesseract-ocr-por poppler-utils pkg-config
+        make -C ocr
+
+    - if: inputs.browser == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+        cache: npm
+        cache-dependency-path: browser/package-lock.json
+    - if: inputs.browser == 'true'
+      name: Navegador (Playwright + Chromium)
+      shell: bash
+      working-directory: browser
+      run: |
+        npm ci --no-audit --no-fund
+        npx playwright install chromium
