@@ -21,6 +21,28 @@ Roda sozinho no **GitHub Actions** a cada hora, sem servidor.
 Em cada aviso aparecem o status, o período de inscrição, a modalidade, o link oficial e, quando o
 documento informa, **quantas vagas de Ciência da Computação em Cuiabá** existem.
 
+## Verificação cruzada (confiança)
+
+Cada leitura é confirmada por um método independente. O alerta mostra o resultado:
+
+```
+🔒 Confiança: alta — HTML×navegador ✔ · página×navegador ✔ · texto×OCR ✔ · heurística×Claude ✔
+```
+
+| Verificação | O que compara |
+|---|---|
+| **HTML×navegador** | publicações e ciclos lidos via HTTP × lidos no Chromium (JS executado) |
+| **página×navegador** | texto da página da publicação via HTTP × renderizada |
+| **texto×OCR** | camada de texto do PDF × OCR em C das primeiras páginas (conteúdo e período de inscrição) |
+| **heurística×Claude** | período de inscrição extraído pelo código × extraído pelo Claude |
+
+- **alta**: todas as verificações bateram. **média**: alguma não pôde rodar (ex.: sem chave do
+  Claude ou PDF escaneado, que só o OCR lê). **baixa**: alguma leitura divergiu, e o alerta mostra
+  o quê.
+- Em caso de divergência, o bot **não descarta nada**: usa a união das leituras e prioriza
+  "inscrição aberta", para nunca perder um prazo. Se a divergência persistir em duas execuções
+  seguidas, você recebe "⚠️ leituras divergentes" (e "✅" quando voltar a bater).
+
 O status (aberta / prevista / encerrada) é sempre calculado **pelo código**, a partir das datas.
 Títulos como *"Processo Seletivo Encerrado"* também contam como sinal. O teste com o processo
 atual (2026/1, inscrições de 23 a 28/06/2026) resulta em **encerrado**, como esperado.
@@ -30,6 +52,7 @@ atual (2026/1, inscrições de 23 a 28/06/2026) resulta em **encerrado**, como e
 ```
 ufmt_monitor/          Python: orquestração, scraping, classificação, Telegram
   monitor.py           compara com o estado anterior e decide o que avisar
+  verify.py            verificação cruzada e nível de confiança
   extract.py           HTML/PDF sem seletores frágeis (cards com data, menus, filtros)
   dates.py             datas em português e períodos de inscrição
   classify.py          modalidade, status, relevância, vagas de Computação
@@ -42,9 +65,9 @@ sources.toml           fontes monitoradas (edite aqui)
 state/state.json       estado (o workflow faz commit só quando algo muda)
 ```
 
-O navegador e o OCR só entram **quando necessários**. O caminho normal é HTTP simples, que é
-rápido e barato. Se o navegador ou o OCR não estiverem instalados, o bot continua funcionando
-sem eles.
+Navegador, OCR e Claude rodam junto com a leitura HTTP para **confirmar** cada leitura (veja
+"Verificação cruzada"). Se algum deles não estiver disponível, o bot continua funcionando, mas
+a confiança dos alertas cai para "média".
 
 ## Colocar no ar (GitHub Actions)
 
@@ -69,9 +92,10 @@ sem eles.
 
 | Variável | Padrão | Efeito |
 |---|---|---|
-| `BROWSER` | `1` | `0` desliga o navegador (execuções mais rápidas) |
-| `OCR` | `1` | `0` desliga o OCR |
+| `BROWSER` | `1` | `0` desliga o navegador (sem verificação HTML×navegador) |
+| `OCR` | `1` | `0` desliga o OCR (sem verificação texto×OCR) |
 | `HEARTBEAT_DAYS` | `7` | dias entre mensagens "funcionando" (`0` desliga) |
+| `OCR_VERIFY_PAGES` | `3` | páginas de cada PDF conferidas por OCR |
 
 **Custo do Actions:** em repositório **público** é grátis e ilimitado. Em repositório **privado**
 o plano grátis tem 2.000 min/mês; cada execução leva de 1 a 2 min, então de hora em hora pode

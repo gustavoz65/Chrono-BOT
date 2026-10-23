@@ -14,6 +14,7 @@ log = logging.getLogger(__name__)
 OCR_BIN = Path(os.getenv("OCR_BIN", ROOT / "ocr" / "bin" / "ocr"))
 MAX_OCR_PAGES = int(os.getenv("OCR_MAX_PAGES", "15"))
 MIN_CHARS_PER_PAGE = 80
+VERIFY_PAGES = int(os.getenv("OCR_VERIFY_PAGES", "3"))
 
 
 def available() -> bool:
@@ -24,7 +25,7 @@ def needs_ocr(text: str, pages: int) -> bool:
     return len(text.strip()) < MIN_CHARS_PER_PAGE * max(1, min(pages, MAX_OCR_PAGES))
 
 
-def ocr_pdf(data: bytes, lang: str = "por", timeout: int = 300) -> str:
+def ocr_pdf(data: bytes, lang: str = "por", timeout: int = 300, max_pages: int = MAX_OCR_PAGES) -> str:
     if not available():
         log.info("OCR indisponível (compile ocr/ com `make` e instale poppler-utils)")
         return ""
@@ -32,7 +33,7 @@ def ocr_pdf(data: bytes, lang: str = "por", timeout: int = 300) -> str:
         pdf = Path(tmp) / "doc.pdf"
         pdf.write_bytes(data)
         subprocess.run(
-            ["pdftoppm", "-r", "200", "-gray", "-png", "-l", str(MAX_OCR_PAGES), str(pdf), str(Path(tmp) / "p")],
+            ["pdftoppm", "-r", "200", "-gray", "-png", "-l", str(max_pages), str(pdf), str(Path(tmp) / "p")],
             check=True, timeout=timeout, capture_output=True,
         )
         images = sorted(str(p) for p in Path(tmp).glob("p*.png"))

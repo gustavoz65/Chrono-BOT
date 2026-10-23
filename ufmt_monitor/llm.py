@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import replace
 from datetime import date
 
-from .classify import Assessment
-from .dates import Window
+from .classify import TITLE_CLOSED_RE, Assessment
+from .dates import Window, fold, overall_status
+from .verify import Check, compare_windows
 
 log = logging.getLogger(__name__)
 
+CHECK = "heurística×Claude"
 MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-5-5")
 MAX_CHARS = 200_000
 
@@ -54,9 +57,14 @@ def _parse_date(raw: str) -> date | None:
         return None
 
 
+def _skip(heuristic: Assessment, reason: str) -> Assessment:
+    log.warning("Claude: %s; usando heurística", reason)
+    return replace(heuristic, checks=[*heuristic.checks, Check(CHECK, None, reason)])
+
+
 def refine(title: str, body: str, heuristic: Assessment, today: date) -> Assessment:
     if not enabled():
-        return heuristic
+        return replace(heuristic, checks=[*heuristic.checks, Check(CHECK, None, "Claude não configurado")])
     import anthropic
 
     truncated = len(body) > MAX_CHARS
@@ -77,37 +85,34 @@ def refine(title: str, body: str, heuristic: Assessment, today: date) -> Assessm
             fallbacks="default",
         )
     except anthropic.RateLimitError as exc:
-        log.warning("Claude: limite de requisições (%s); usando heurística", exc)
-        return heuristic
+        return _skip(heuristic, f"limite de requisições ({exc})")
     except anthropic.APIStatusError as exc:
-        log.warning("Claude: erro HTTP %s (%s); usando heurística", exc.status_code, exc)
-        return heuristic
+        return _skip(heuristic, f"erro HTTP {exc.status_code}")
     except anthropic.APIConnectionError as exc:
-        log.warning("Claude: falha de conexão (%s); usando heurística", exc)
-        return heuristic
+        return _skip(heuristic, f"falha de conexão ({exc})")
 
     if resp.stop_reason in ("refusal", "max_tokens"):
-        log.warning("Claude: resposta incompleta (%s); usando heurística", resp.stop_reason)
-        return heuristic
+        return _skip(heuristic, f"resposta incompleta ({resp.stop_reason})")
     text = next((b.text for b in resp.content if b.type == "text"), "")
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        log.warning("Claude: JSON inválido; usando heurística")
-        return heuristic
+        return _skip(heuristic, "JSON inválido")
 
     start, end = _parse_date(data["inscricao_inicio"]), _parse_date(data["inscricao_fim"])
-    window = heuristic.window
-    windows = list(heuristic.windows)
-    status = heuristic.status
-    if (start or end) and heuristic.status in ("indeterminada", "prevista", "aberta"):
-        window = Window(start, end, "extraído pelo Claude")
-        windows.append(window)
-        status = window.status(today)
+    claude_windows = [Window(start, end, "extraído pelo Claude")] if (start or end) else []
+    check = compare_windows(CHECK, heuristic.windows, claude_windows)
+    windows = heuristic.windows + [w for w in claude_windows if (w.start, w.end) not in
+                                   {(h.start, h.end) for h in heuristic.windows}]
+    status, window = overall_status(windows, today)
+    if TITLE_CLOSED_RE.search(fold(title)):
+        status = "encerrada"
+    elif status == "indeterminada":
+        status = heuristic.status
     return Assessment(
-        modalidade=data["modalidade"],
+        modalidade=data["modalidade"] if data["modalidade"] != "outro" else heuristic.modalidade,
         status=status,
-        window=window,
+        window=window or heuristic.window,
         windows=windows,
         computacao=heuristic.computacao or data["oferece_ciencia_computacao"],
         computacao_cuiaba=heuristic.computacao_cuiaba or data["ciencia_computacao_cuiaba"],
@@ -115,4 +120,5 @@ def refine(title: str, body: str, heuristic: Assessment, today: date) -> Assessm
             data["vagas_ciencia_computacao_cuiaba"] if data["vagas_ciencia_computacao_cuiaba"] >= 0 else None),
         resumo=data["resumo"],
         fonte_analise=f"heurística + Claude ({resp.model})",
+        checks=[*heuristic.checks, check],
     )

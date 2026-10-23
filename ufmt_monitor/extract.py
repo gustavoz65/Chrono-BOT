@@ -13,7 +13,10 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from . import browser, ocr
-from .dates import fold
+from .dates import fold, inscription_windows
+from .verify import Check, compare_text, compare_windows
+
+PAGE_CHECK = "página×navegador"
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +60,7 @@ class Page:
     nav_links: list[Link] = field(default_factory=list)
     selects: list[Select] = field(default_factory=list)
     option_urls: dict[str, str] = field(default_factory=dict)
+    checks: list[Check] = field(default_factory=list)
 def normalize_url(url: str) -> str:
     parts = urlsplit(url.strip())
     query = sorted((k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
@@ -133,23 +137,47 @@ def parse_html(html: str, base_url: str, status_code: int = 200) -> Page:
     return Page(base_url, title, text, links, list(dict.fromkeys(blocks)), status_code, nav_links, selects)
 
 
-def pdf_text(data: bytes) -> str:
+@dataclass
+class Document:
+    text: str
+    sources: list[str]
+    checks: list[Check] = field(default_factory=list)
+
+
+def check_pdf_readings(layer_pages: list[str], scanned: str) -> Check:
+    name = "texto×OCR"
+    layer = clean(" ".join(layer_pages))
+    if not scanned:
+        return Check(name, None, "OCR indisponível ou sem resultado")
+    if not layer:
+        return Check(name, None, "PDF escaneado: só o OCR consegue ler")
+    words = compare_text(name, layer, scanned)
+    windows = compare_windows(name, inscription_windows(layer), inscription_windows(scanned))
+    return Check(name, bool(words.ok and windows.ok), f"{words.detail}; {windows.detail}")
+
+
+def pdf_reading(data: bytes) -> tuple[str, Check]:
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(data))
     parts = []
     for page in reader.pages[:MAX_PDF_PAGES]:
         try:
-            parts.append(page.extract_text() or "")
+            parts.append(clean(page.extract_text() or ""))
         except Exception as exc:
             log.warning("falha ao extrair página de PDF: %s", exc)
     text = clean(" ".join(parts))
     if ocr.needs_ocr(text, len(reader.pages)):
         scanned = clean(ocr.ocr_pdf(data))
-        if len(scanned) > len(text):
-            log.info("PDF lido via OCR (%d caracteres)", len(scanned))
-            return scanned
-    return text
+        check = check_pdf_readings([], scanned)
+        return (scanned if len(scanned) > len(text) else text), check
+    pages = min(ocr.VERIFY_PAGES, len(parts))
+    scanned = clean(ocr.ocr_pdf(data, max_pages=pages)) if ocr.available() else ""
+    return text, check_pdf_readings(parts[:pages], scanned)
+
+
+def pdf_text(data: bytes) -> str:
+    return pdf_reading(data)[0]
 
 
 class Fetcher:
@@ -176,7 +204,8 @@ class Fetcher:
         if "pdf" in ctype or urlsplit(url).path.lower().endswith(".pdf"):
             if len(resp.content) > MAX_PDF_BYTES:
                 raise ValueError(f"PDF grande demais ({len(resp.content)} bytes)")
-            return Page(url, urlsplit(url).path.rsplit("/", 1)[-1], pdf_text(resp.content), status_code=resp.status_code)
+            text, check = pdf_reading(resp.content)
+            return Page(url, urlsplit(url).path.rsplit("/", 1)[-1], text, status_code=resp.status_code, checks=[check])
         resp.encoding = resp.encoding if resp.encoding and resp.encoding.lower() != "iso-8859-1" else resp.apparent_encoding
         return parse_html(resp.text, resp.url or url, resp.status_code)
 
@@ -188,16 +217,32 @@ class Fetcher:
         page.option_urls = {o["value"]: normalize_url(o["url"]) for o in data.get("options", [])}
         return page
 
-    def document_text(self, url: str, verify: bool = True, max_pdfs: int = 3) -> tuple[str, list[str]]:
+    def _cross_check_page(self, page: Page) -> tuple[Page, Check]:
+        try:
+            rendered = self.render(page.url)
+        except Exception as exc:
+            return page, Check(PAGE_CHECK, None, f"navegador indisponível ({exc})"[:200])
+        if len(rendered.text) > 2 * len(page.text) + 200:
+            return rendered, Check(PAGE_CHECK, None, "conteúdo só aparece com JavaScript; lido pelo navegador")
+        check = compare_text(PAGE_CHECK, page.text, rendered.text)
+        return page, check
+
+    def document(self, url: str, verify: bool = True, max_pdfs: int = 3) -> Document:
         page = self.page(url, verify)
+        checks = list(page.checks)
+        if not checks:
+            page, check = self._cross_check_page(page)
+            checks.append(check)
         texts, sources = [page.text], [url]
         if page.links:
             pdfs = [link for link in page.links if link.is_pdf]
             priority = lambda link: 0 if re.search(r"edital|cronograma|retifica|aviso", fold(link.text + link.url)) else 1  # noqa: E731
             for link in sorted(pdfs, key=priority)[:max_pdfs]:
                 try:
-                    texts.append(self.page(link.url, verify).text)
+                    attachment = self.page(link.url, verify)
+                    texts.append(attachment.text)
                     sources.append(link.url)
+                    checks += attachment.checks
                 except Exception as exc:
                     log.warning("não foi possível ler anexo %s: %s", link.url, exc)
-        return "\n\n".join(t for t in texts if t), sources
+        return Document("\n\n".join(t for t in texts if t), sources, checks)

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from .dates import Window, fold, inscription_windows, overall_status
+from .verify import Check, confidence
 
 GRADUADO_RE = re.compile(
     r"admissao\s+de\s+graduad|portador(?:es)?\s+de\s+diploma|ingresso\s+de\s+graduad"
@@ -110,6 +111,11 @@ class Assessment:
     vagas_cc: int | None = None
     resumo: str = ""
     fonte_analise: str = "heurística"
+    checks: list[Check] = field(default_factory=list)
+
+    @property
+    def confidence(self) -> str:
+        return confidence(self.checks)
 
     @property
     def status_label(self) -> str:

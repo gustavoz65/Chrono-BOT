@@ -16,6 +16,7 @@ from .config import Source
 from .dates import DATE_RE, fold, inscription_windows, overall_status
 from .extract import Fetcher, Link, Page, normalize_url
 from .notify import Telegram, esc
+from .verify import Check, compare_listing, compare_text, merge, summary
 
 log = logging.getLogger(__name__)
 
@@ -109,13 +110,18 @@ def page_snippets(page: Page) -> list[str]:
     return [b[:600] for b in page.blocks if is_graduado(b)]
 
 
-def analyze(fetcher: Fetcher, link: Link, source: Source, today: date) -> Publication:
+def analyze(fetcher: Fetcher, link: Link, source: Source, today: date,
+            listing_check: Check | None = None) -> Publication:
+    checks = [listing_check] if listing_check else []
     try:
-        body, read_from = fetcher.document_text(link.url, source.verify_tls)
-        error = ""
+        doc = fetcher.document(link.url, source.verify_tls)
+        body, read_from, error = doc.text, doc.sources, ""
+        checks += doc.checks
     except Exception as exc:
         body, read_from, error = link.context, [], f"{type(exc).__name__}: {exc}"
+        checks.append(Check("leitura da publicação", False, error[:200]))
     result = assess(link.text, f"{link.context}\n{body}", today)
+    result.checks = checks
     if source.kind == "listing" and result.modalidade == "outro" and source.modalidade:
         result.modalidade = source.modalidade
     result = llm.refine(link.text, body, result, today)
@@ -140,6 +146,10 @@ def _pub_lines(pub: Publication) -> list[str]:
         lines.append(f"<b>Resumo:</b> {esc(a.resumo)}")
     if pub.error:
         lines.append(f"<i>Não consegui ler os detalhes ({esc(pub.error[:150])}).</i>")
+    lines.append(f"🔒 <b>Confiança: {a.confidence}</b> — {esc(summary(a.checks))}")
+    for c in merge(a.checks):
+        if c.ok is False:
+            lines.append(f"   ✖ {esc(c.name)}: {esc(c.detail)}")
     lines.append(f"<b>Análise:</b> {esc(a.fonte_analise)}")
     lines.append(f"<b>Fonte:</b> {esc(pub.source.name)}")
     lines.append(esc(pub.url))
@@ -199,6 +209,7 @@ def _record(state: dict[str, Any], pub: Publication, today: date) -> dict[str, A
         "modalidade": pub.assessment.modalidade,
         "status": pub.assessment.status,
         "vagas_cc": pub.assessment.vagas_cc,
+        "confianca": pub.assessment.confidence,
         "start": w.start.isoformat() if w and w.start else None,
         "end": w.end.isoformat() if w and w.end else None,
         "first_seen": rec.get("first_seen", today.isoformat()),
@@ -217,6 +228,7 @@ class Monitor:
         self.tg = telegram
         self.today = today or date.today()
         self.heartbeat_days = int(os.getenv("HEARTBEAT_DAYS", "7"))
+        self.listing_checks: dict[str, Check] = {}
 
     def run(self) -> dict[str, int]:
         stats = {"ok": 0, "failed": 0, "new_items": 0, "alerts": 0}
@@ -232,8 +244,7 @@ class Monitor:
             try:
                 page = self.fetcher.page(source.url, source.verify_tls)
                 items = listing_items(page, source) if source.kind == "listing" else page_items(page)
-                if source.kind == "listing" and len(items) < source.min_items:
-                    page, items = self._try_browser(source, page, items)
+                page, items = self.verify(source, page, items)
                 if source.kind == "listing" and len(items) < source.min_items:
                     raise RuntimeError(
                         f"só {len(items)} publicação(ões) encontradas — o layout da página pode ter mudado")
@@ -286,7 +297,7 @@ class Monitor:
             return []
         picks = items[:BASELINE_ANALYZE]
         picks += [link for link in items[BASELINE_ANALYZE:] if is_important(link.text, "")][:1]
-        pubs = [analyze(self.fetcher, link, source, self.today) for link in picks]
+        pubs = [analyze(self.fetcher, link, source, self.today, self.listing_checks.get(source.id)) for link in picks]
         for pub in pubs:
             _record(self.state, pub, self.today)
         return pubs
@@ -297,7 +308,7 @@ class Monitor:
         new = [link for link in items if link.url not in known]
         routine: list[Publication] = []
         for link in new:
-            pub = analyze(self.fetcher, link, source, self.today)
+            pub = analyze(self.fetcher, link, source, self.today, self.listing_checks.get(source.id))
             _record(self.state, pub, self.today)
             if is_important(pub.title, pub.assessment.status):
                 self.tg.send(new_publication_message(pub))
@@ -325,18 +336,47 @@ class Monitor:
         lines += [esc(source.url), "", "<i>Confirme no site oficial.</i>"]
         return "\n".join(lines)
 
-    def _try_browser(self, source: Source, page: Page, items: list[Link]) -> tuple[Page, list[Link]]:
+    def verify(self, source: Source, page: Page, items: list[Link]) -> tuple[Page, list[Link]]:
+        extract = (lambda pg: listing_items(pg, source)) if source.kind == "listing" else page_items
         try:
             rendered = self.fetcher.render(source.url)
         except Exception as exc:
-            log.info("navegador indisponível para %s: %s", source.id, exc)
-            return page, items
-        rendered_items = listing_items(rendered, source)
-        if len(rendered_items) > len(items):
-            log.info("%s: %d publicações via navegador", source.id, len(rendered_items))
-            return rendered, rendered_items
-        return page, items
+            check = Check("HTML×navegador", None, f"navegador indisponível ({exc})"[:200])
+            return page, self._record_check(source, check, items)
+        rendered_items = extract(rendered)
+        if source.kind == "listing" and not items and rendered_items:
+            check = Check("HTML×navegador", None, "publicações só aparecem com JavaScript; lido pelo navegador")
+            return rendered, self._record_check(source, check, rendered_items)
+        if source.kind == "listing":
+            labels = lambda pg: {c.label for c in discover_cycles(pg, source.url)}  # noqa: E731
+            check = compare_listing([i.url for i in items], [i.url for i in rendered_items],
+                                    labels(page), labels(rendered))
+            if len(labels(rendered)) > len(labels(page)):
+                page = rendered
+        else:
+            check = compare_text("HTML×navegador", page.text, rendered.text)
+        return page, self._record_check(source, check, _dedupe(items + rendered_items))
 
+    def _record_check(self, source: Source, check: Check, items: list[Link]) -> list[Link]:
+        self.listing_checks[source.id] = check
+        src = self._src(source)
+        src["verification"] = check.to_dict()
+        if check.ok is False:
+            src["divergences"] = src.get("divergences", 0) + 1
+            if src["divergences"] >= 2 and not src.get("alerted_divergence"):
+                src["alerted_divergence"] = True
+                self.tg.send("\n".join([
+                    "⚠️ <b>Monitor UFMT: leituras divergentes</b>", "",
+                    f"<b>Fonte:</b> {esc(source.name)}",
+                    f"<b>HTML × navegador:</b> {esc(check.detail)}", esc(source.url), "",
+                    "<i>Uso a união das duas leituras para não perder nada, mas vale conferir o site.</i>",
+                ]))
+        else:
+            if src.get("alerted_divergence") and check.ok:
+                self.tg.send(f"✅ <b>Leituras voltaram a bater:</b> {esc(source.name)}")
+            src["divergences"] = 0
+            src["alerted_divergence"] = False
+        return items
 
     def _followed(self) -> list[Source]:
         out = []
@@ -380,7 +420,7 @@ class Monitor:
             try:
                 child_items = listing_items(self.fetcher.page(cycle.url, source.verify_tls), child)
                 self._store(child, child_items, [])
-                pubs = [analyze(self.fetcher, link, child, self.today) for link in child_items[:BASELINE_ANALYZE]]
+                pubs = [analyze(self.fetcher, link, child, self.today, self.listing_checks.get(child.id)) for link in child_items[:BASELINE_ANALYZE]]
                 for pub in pubs:
                     _record(self.state, pub, self.today)
             except Exception as exc:
@@ -480,6 +520,10 @@ class Monitor:
         latest = max(tracked, key=lambda r: r.get("end") or r.get("start") or "", default=None)
         lines = ["💓 <b>Monitor UFMT funcionando</b>",
                  f"Fontes OK nesta execução: {stats['ok']}/{len(self.sources)}."]
+        checks = list(self.listing_checks.values())
+        if checks:
+            confirmed = sum(1 for c in checks if c.ok)
+            lines.append(f"Leituras confirmadas HTML×navegador: {confirmed}/{len(checks)}.")
         if latest:
             lines.append(f"Último processo conhecido: {esc(latest.get('title', ''))} — {esc(latest.get('status', '?'))}.")
         lines.append("Nenhuma inscrição aberta no momento." if not any(

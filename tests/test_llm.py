@@ -35,9 +35,11 @@ PAYLOAD = {
 }
 
 
-def test_sem_chave_usa_so_heuristica():
+def test_sem_chave_usa_so_heuristica_e_registra_que_nao_verificou():
     h = assess("t", "Inscrições até 01/01/2026", HOJE)
-    assert llm.refine("t", "x", h, HOJE) is h
+    r = llm.refine("t", "x", h, HOJE)
+    assert (r.status, r.window) == (h.status, h.window)
+    assert r.checks[-1].ok is None and r.confidence == "média"
 
 
 def test_claude_complementa_datas_que_a_heuristica_nao_achou(monkeypatch):
@@ -53,4 +55,21 @@ def test_claude_complementa_datas_que_a_heuristica_nao_achou(monkeypatch):
 def test_recusa_volta_para_heuristica(monkeypatch):
     install(monkeypatch, FakeMessages(PAYLOAD, stop_reason="refusal"))
     h = assess("t", "nada", HOJE)
-    assert llm.refine("t", "nada", h, HOJE) is h
+    r = llm.refine("t", "nada", h, HOJE)
+    assert r.status == h.status and "refusal" in r.checks[-1].detail
+
+
+def test_heuristica_e_claude_concordam_confianca_alta(monkeypatch):
+    install(monkeypatch, FakeMessages(PAYLOAD))
+    h = assess("Edital", "Inscrições de 20/10/2026 a 30/10/2026", HOJE)
+    r = llm.refine("Edital", "x", h, HOJE)
+    assert r.checks[-1].ok is True and r.confidence == "alta"
+
+
+def test_divergencia_prioriza_inscricao_aberta_e_baixa_confianca(monkeypatch):
+    install(monkeypatch, FakeMessages(PAYLOAD))
+    h = assess("Edital", "Inscrições de 01/09/2026 a 05/09/2026", HOJE)
+    assert h.status == "encerrada"
+    r = llm.refine("Edital", "x", h, HOJE)
+    assert r.status == "aberta" and r.confidence == "baixa"
+    assert "≠" in r.checks[-1].detail

@@ -13,6 +13,7 @@ from .extract import Fetcher
 from .monitor import (BASELINE_ANALYZE, Monitor, analyze, discover_cycles, listing_items, page_items,
                       page_snippets)
 from .notify import Telegram, esc
+from .verify import merge, summary
 
 
 def cmd_run(args) -> int:
@@ -39,9 +40,13 @@ def cmd_check(args) -> int:
             report.append(f"- ❌ **FALHA**: `{type(exc).__name__}: {exc}`\n")
             continue
         items = listing_items(page, source) if source.kind == "listing" else page_items(page)
+        checker = Monitor([source], state.empty(), fetcher, Telegram(dry_run=True), today)
+        page, items = checker.verify(source, page, items)
+        check = checker.listing_checks[source.id]
         snippets = page_snippets(page)
         report.append(f"- ✅ HTTP {page.status_code} · título: {page.title!r} · {len(page.text)} caracteres")
         report.append(f"- Publicações/links considerados: **{len(items)}** · trechos sobre graduados: {len(snippets)}")
+        report.append(f"- Verificação {check.name}: {check.icon} {check.detail}")
         if source.kind == "listing" and len(items) < source.min_items:
             critical_failed |= source.critical
             report.append("- ⚠️ Nenhuma publicação reconhecida — ajuste `item_pattern` em sources.toml")
@@ -54,7 +59,6 @@ def cmd_check(args) -> int:
             if browser.available():
                 try:
                     rendered = fetcher.render(source.url, discover=True)
-                    report.append(f"- Navegador: {len(listing_items(rendered, source))} publicações no DOM renderizado")
                     cycles = discover_cycles(rendered, source.url)
                 except Exception as exc:
                     report.append(f"- ⚠️ Navegador falhou: `{exc}`")
@@ -63,12 +67,13 @@ def cmd_check(args) -> int:
                 report.append(f"  - [{c.kind}] {c.label} → {c.url}")
             report.append(f"\n**Análise das {BASELINE_ANALYZE} publicações mais recentes:**")
             for link in items[:BASELINE_ANALYZE]:
-                pub = analyze(fetcher, link, source, today)
+                pub = analyze(fetcher, link, source, today, check)
                 a = pub.assessment
                 win = a.window.label() if a.window else "datas não identificadas"
                 vagas = f" · vagas CC Cuiabá: {a.vagas_cc}" if a.vagas_cc is not None else ""
                 report.append(f"  - **{a.status_label}** · {pub.title[:100]} · inscrições: {win} "
-                              f"· {a.modalidade_label}{vagas} · lido de {len(pub.read_from)} doc(s)"
+                              f"· {a.modalidade_label}{vagas} · lido de {len(pub.read_from)} doc(s) "
+                              f"· confiança {a.confidence} ({summary(a.checks)})"
                               + (f" · erro: {pub.error}" if pub.error else ""))
         report.append("")
     text = "\n".join(report)
@@ -83,9 +88,14 @@ def cmd_check(args) -> int:
 
 def cmd_analyze(args) -> int:
     today = date.fromisoformat(args.today) if args.today else date.today()
-    body, read_from = Fetcher().document_text(args.url)
-    result = llm.refine("", body, assess("", body, today), today)
-    print(f"Lido de: {read_from}")
+    doc = Fetcher().document(args.url)
+    heuristic = assess("", doc.text, today)
+    heuristic.checks = doc.checks
+    result = llm.refine("", doc.text, heuristic, today)
+    print(f"Lido de: {doc.sources}")
+    print(f"Confiança: {result.confidence}")
+    for c in merge(result.checks):
+        print(f"  {c.icon} {c.name}: {c.detail}")
     print(f"Modalidade: {result.modalidade_label}\nStatus: {result.status_label}")
     print(f"Período principal: {result.window.label() if result.window else '-'}")
     for w in result.windows:
