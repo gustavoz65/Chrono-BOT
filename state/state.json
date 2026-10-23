@@ -1,0 +1,49 @@
+{
+  "last_heartbeat": "2026-10-23",
+  "publications": {},
+  "sources": {
+    "fct-noticias": {
+      "alerted_divergence": false,
+      "alerted_failure": false,
+      "divergences": 0,
+      "failures": 0,
+      "items": {},
+      "snippets": [],
+      "verification": {
+        "detail": "navegador indisponível (navegador indisponível (instale com `npm ci` em browser/))",
+        "name": "HTML×navegador",
+        "ok": null
+      }
+    },
+    "ic-graduacao": {
+      "alerted_divergence": false,
+      "alerted_failure": false,
+      "divergences": 0,
+      "failures": 0,
+      "items": {},
+      "snippets": [],
+      "verification": {
+        "detail": "navegador indisponível (navegador indisponível (instale com `npm ci` em browser/))",
+        "name": "HTML×navegador",
+        "ok": null
+      }
+    },
+    "ingresso-home": {
+      "alerted_failure": false,
+      "failures": 1
+    },
+    "ingresso-publicacoes-graduado": {
+      "alerted_failure": false,
+      "failures": 1
+    },
+    "ingresso-sobre-graduado": {
+      "alerted_failure": false,
+      "failures": 1
+    },
+    "sistema-graduado-legado": {
+      "alerted_failure": false,
+      "failures": 1
+    }
+  },
+  "version": 2
+}
