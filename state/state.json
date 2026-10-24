@@ -29,20 +29,20 @@
       }
     },
     "ingresso-home": {
-      "alerted_failure": false,
-      "failures": 1
+      "alerted_failure": true,
+      "failures": 2
     },
     "ingresso-publicacoes-graduado": {
-      "alerted_failure": false,
-      "failures": 1
+      "alerted_failure": true,
+      "failures": 2
     },
     "ingresso-sobre-graduado": {
       "alerted_failure": false,
-      "failures": 1
+      "failures": 2
     },
     "sistema-graduado-legado": {
       "alerted_failure": false,
-      "failures": 1
+      "failures": 2
     }
   },
   "version": 2
