@@ -30,19 +30,19 @@
     },
     "ingresso-home": {
       "alerted_failure": true,
-      "failures": 5
+      "failures": 6
     },
     "ingresso-publicacoes-graduado": {
       "alerted_failure": true,
-      "failures": 5
+      "failures": 6
     },
     "ingresso-sobre-graduado": {
       "alerted_failure": true,
-      "failures": 5
+      "failures": 6
     },
     "sistema-graduado-legado": {
       "alerted_failure": true,
-      "failures": 5
+      "failures": 6
     }
   },
   "version": 2
