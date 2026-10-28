@@ -107,3 +107,9 @@ def test_periodo_que_atravessa_o_ano(text):
 def test_data_invalida_no_inicio_nao_vira_inicio_do_periodo():
     [w] = inscription_windows("Inscrições: 31/02/2026 a 10/03/2026", HOJE)
     assert (w.start, w.end) == (None, date(2026, 3, 10))
+
+
+def test_etapa_da_frase_anterior_nao_anula_o_periodo():
+    [w] = inscription_windows("Admissão de Graduado 2026/2 - Resultado\nInscrições de 20/10/2026 a 30/10/2026.", HOJE)
+    assert (w.start, w.end) == (date(2026, 10, 20), date(2026, 10, 30))
+    assert inscription_windows("Resultado da homologação das inscrições: 20/10/2026", HOJE) == []

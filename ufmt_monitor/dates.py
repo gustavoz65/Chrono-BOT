@@ -132,8 +132,9 @@ def inscription_windows(text: str, today: date | None = None) -> list[Window]:
     seen: set[tuple] = set()
     for kw in INSCRICAO_RE.finditer(folded):
         lead = folded[max(0, kw.start() - 60):kw.start()]
-        # Só o trecho imediatamente anterior decide se é outra etapa ("homologação das inscrições").
-        if NOT_WINDOW_RE.search(lead[-35:]):
+        # Só o trecho imediatamente anterior, na mesma frase, decide se é outra etapa ("homologação das
+        # inscrições"); "Resultado.\nInscrições de..." é outra frase e não anula o período.
+        if NOT_WINDOW_RE.search(re.split(r"[\n;]|\.\s", lead[-35:])[-1]):
             continue
         stop = min(len(folded), kw.end() + 220)
         nxt = INSCRICAO_RE.search(folded, kw.end(), stop)

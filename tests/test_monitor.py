@@ -288,3 +288,32 @@ def test_heartbeat_conta_so_as_fontes_configuradas(fixture_text):
     st = started(fixture_text)
     tg = run(make_pages(fixture_text), st, today=date(2026, 11, 5))
     assert any("Fontes OK nesta execução: 2/2." in m for m in tg.sent)
+
+
+def test_fonte_nova_com_inscricao_aberta_avisa(fixture_text, monkeypatch):
+    monkeypatch.setenv("HEARTBEAT_DAYS", "0")
+    st = started(fixture_text)
+    nova_url = "https://www.ufmt.br/unidade/ingresso/publicacoes?category=300&id=61&page=1"
+    nova = Source("nova", "Fonte nova", nova_url, kind="listing", modalidade="admissao_graduados")
+    pages = make_pages(fixture_text, **{
+        nova_url: child_listing((PUB(9500), "Edital - Admissão de Graduado 2026/2", "20/10/2026"),
+                                (PUB(9501), "Admissão de Graduado 2026/2 - Resultado", "21/10/2026")),
+        PUB(9500): "<html><body><p>Admissão de Graduados. Inscrições de 20/10/2026 a 30/10/2026.</p></body></html>",
+        PUB(9501): "<html><body><p>Resultado preliminar.</p></body></html>",
+    })
+    tg = run(pages, st, sources=(LISTING, HOME, nova))
+    assert len(tg.sent) == 1 and "INSCRIÇÕES ABERTAS" in tg.sent[0] and "2026/2" in tg.sent[0]
+    assert run(pages, st, sources=(LISTING, HOME, nova)).sent == []
+
+
+def test_estado_poda_fontes_removidas_e_publicacoes_antigas(fixture_text):
+    st = started(fixture_text)
+    st["sources"]["removida"] = {"failures": 9, "items": {}}
+    st["publications"]["https://www.ufmt.br/velha"] = {"end": "2024-01-10", "notified": []}
+    st["publications"]["https://www.ufmt.br/sem-data"] = {"first_seen": "2024-01-10", "notified": []}
+    run(make_pages(fixture_text), st)
+    assert "removida" not in st["sources"]
+    assert "https://www.ufmt.br/velha" not in st["publications"]
+    assert "https://www.ufmt.br/sem-data" not in st["publications"]
+    assert PUB(9010) in st["publications"]
+    assert any("@" in sid for sid in st["sources"]), "ciclos seguidos ficam"
