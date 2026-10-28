@@ -1,8 +1,10 @@
+import os
+
 import pytest
 import requests
 
 from ufmt_monitor import notify
-from ufmt_monitor.config import load_sources
+from ufmt_monitor.config import load_env, load_sources
 from ufmt_monitor.extract import parse_html
 
 
@@ -50,3 +52,16 @@ def test_item_pattern_invalido_falha_ao_carregar(tmp_path):
     cfg.write_text('[[source]]\nid="a"\nname="A"\nurl="https://ufmt.br"\nitem_pattern="(["\n', encoding="utf-8")
     with pytest.raises(ValueError, match="item_pattern"):
         load_sources(cfg)
+
+
+def test_env_le_arquivo_sem_sobrescrever_o_ambiente(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_text('﻿# comentário\nTELEGRAM_BOT_TOKEN="123:abc"\nexport TELEGRAM_CHAT_ID=42\n'
+                   "GROQ_API_KEY=\nHEARTBEAT_DAYS=3\n", encoding="utf-8")
+    monkeypatch.setenv("HEARTBEAT_DAYS", "7")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    load_env(env)  # o conftest limpa TELEGRAM_* e GROQ_API_KEY ao fim do teste
+    assert os.environ["TELEGRAM_BOT_TOKEN"] == "123:abc"
+    assert os.environ["TELEGRAM_CHAT_ID"] == "42"
+    assert os.environ["HEARTBEAT_DAYS"] == "7"
+    assert "GROQ_API_KEY" not in os.environ

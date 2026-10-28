@@ -158,6 +158,29 @@ Atalhos (`task --list` mostra todos):
 
 Use `PYTHON=.venv/bin/python task ...` se o Python do projeto não for o `python3` do sistema.
 
+## Rodar no Windows (Agendador de Tarefas)
+
+O `www.ufmt.br` não responde a IPs de fora do Brasil (GitHub Actions, VPS no exterior). Um PC em casa
+resolve. Com Python 3.12+ instalado, no Prompt de Comando, na pasta do projeto:
+
+```bat
+py -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+copy .env.example .env
+notepad .env
+.venv\Scripts\python -m ufmt_monitor check
+.venv\Scripts\python -m ufmt_monitor run
+```
+
+O `.env` é lido automaticamente. Para rodar de hora em hora (troque o caminho):
+
+```bat
+schtasks /Create /SC HOURLY /TN "Monitor UFMT" /TR "cmd /c cd /d C:\caminho\Chrono-BOT && .venv\Scripts\python -m ufmt_monitor run >> monitor.log 2>&1"
+```
+
+O navegador é opcional (`npm --prefix browser ci` e `npm --prefix browser exec -- playwright install
+chromium`). O OCR em C não compila no Windows; sem ele o bot funciona, só sem a verificação texto×OCR.
+
 ## Adicionar ou ajustar fontes
 
 Edite `sources.toml`:
