@@ -8,7 +8,7 @@ from datetime import date
 
 from . import browser, llm, ocr, state
 from .classify import assess
-from .config import load_sources
+from .config import load_env, load_sources
 from .config import today as local_today
 from .extract import Fetcher
 from .monitor import (BASELINE_ANALYZE, Monitor, analyze, discover_cycles, listing_items, page_items,
@@ -128,6 +128,11 @@ def cmd_test_telegram(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # No Windows, a saída redirecionada para arquivo usa cp1252 e os emojis das mensagens quebrariam.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    load_env()
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(prog="ufmt_monitor", description="Monitor de Admissão de Graduados da UFMT")
     parser.add_argument("--sources", default=None, help="caminho do sources.toml")
