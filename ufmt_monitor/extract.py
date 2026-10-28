@@ -105,7 +105,10 @@ def parse_html(html: str, base_url: str, status_code: int = 200) -> Page:
         label = LEADING_DATETIME_RE.sub("", clean(a.get_text(" "))).strip() or clean(a.get("title", ""))
         if not label or PAGINATION_RE.match(label):
             continue
-        url = normalize_url(urljoin(base_url, href))
+        try:
+            url = normalize_url(urljoin(base_url, href))
+        except ValueError:  # href malformado (ex.: "http://[x") não pode derrubar a página inteira
+            continue
         if url == normalize_url(base_url) or url in seen:
             continue
         seen.add(url)

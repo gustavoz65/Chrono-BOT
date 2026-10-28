@@ -21,6 +21,9 @@ import (
 
 const previewRunes = 2500
 
+// maxVagas descarta números absurdos (e o estouro de int32) vindos do modelo.
+const maxVagas = 10000
+
 var DefaultHosts = []string{"ufmt.br"}
 
 var (
@@ -153,20 +156,29 @@ func normalize(o *Output, today time.Time) *ufmtv1.Analysis {
 		Status:                       o.Status,
 		OfereceCienciaComputacao:     o.OfereceCC,
 		CienciaComputacaoCuiaba:      o.CCCuiaba,
-		VagasCienciaComputacaoCuiaba: int32(o.VagasCC),
+		VagasCienciaComputacaoCuiaba: -1,
 		Resumo:                       o.Resumo,
 		Evidencia:                    o.Evidencia,
 	}
 	if !slices.Contains(modalidades, a.Modalidade) {
 		a.Modalidade = "outro"
 	}
+	// Uma data que o modelo informou mas veio inválida (ou período invertido) invalida o período:
+	// sobraria só a outra ponta, e "até <fim>" vira "aberta" sem o início.
+	if (o.InscricaoInicio != "" && a.InscricaoInicio == "") || (o.InscricaoFim != "" && a.InscricaoFim == "") ||
+		(a.InscricaoInicio != "" && a.InscricaoFim != "" && a.InscricaoInicio > a.InscricaoFim) {
+		a.InscricaoInicio, a.InscricaoFim = "", ""
+		if a.Status == "aberta" || !slices.Contains(situacoes, a.Status) {
+			a.Status = "indeterminada"
+		}
+	}
 	if a.InscricaoInicio != "" || a.InscricaoFim != "" {
 		a.Status = Situation(a.InscricaoInicio, a.InscricaoFim, today)
 	} else if !slices.Contains(situacoes, a.Status) {
 		a.Status = "indeterminada"
 	}
-	if a.VagasCienciaComputacaoCuiaba < -1 {
-		a.VagasCienciaComputacaoCuiaba = -1
+	if o.VagasCC >= 0 && o.VagasCC <= maxVagas {
+		a.VagasCienciaComputacaoCuiaba = int32(o.VagasCC)
 	}
 	return a
 }

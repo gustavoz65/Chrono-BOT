@@ -37,6 +37,7 @@ class Telegram:
         self.dry_run = dry_run or not (self.token and self.chat_ids)
         self.sent: list[str] = []
         self.silent_sent: list[str] = []
+        self.errors: list[str] = []
 
     def send(self, message: str, silent: bool = False) -> None:
         self.sent.append(message)
@@ -46,20 +47,32 @@ class Telegram:
             print("— [Telegram não configurado / dry-run] mensagem que seria enviada —\n" + message + "\n")
             return
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
+        # Um chat inválido ou o Telegram fora do ar não pode abortar a execução: o estado deixaria de
+        # ser salvo e tudo seria reprocessado (e reenviado aos outros chats) na próxima.
         for chat_id in self.chat_ids:
-            for part in _chunks(message):
-                for _ in range(4):
-                    resp = requests.post(url, json={
-                        "chat_id": chat_id, "text": part, "parse_mode": "HTML",
-                        "disable_web_page_preview": True, "disable_notification": silent,
-                    }, timeout=30)
-                    if resp.status_code == 429:
-                        retry = resp.json().get("parameters", {}).get("retry_after", 5)
-                        time.sleep(min(int(retry), 60))
-                        continue
-                    if not resp.ok:
-                        # Nunca logar a URL: ela contém o token.
-                        raise RuntimeError(f"Telegram respondeu {resp.status_code}: {resp.text[:300]}")
-                    break
-                else:
-                    raise RuntimeError("Telegram: limite de envio excedido (429)")
+            try:
+                for part in _chunks(message):
+                    self._post(url, chat_id, part, silent)
+            except Exception as exc:
+                # Nunca logar a URL com o token.
+                error = str(exc).replace(self.token, "***")
+                log.error("Telegram: falha ao enviar para %s: %s", chat_id, error)
+                self.errors.append(f"{chat_id}: {error}")
+
+    def _post(self, url: str, chat_id: str, text: str, silent: bool) -> None:
+        for _ in range(4):
+            resp = requests.post(url, json={
+                "chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                "disable_web_page_preview": True, "disable_notification": silent,
+            }, timeout=30)
+            if resp.status_code == 429:
+                try:
+                    retry = int(resp.json().get("parameters", {}).get("retry_after", 5))
+                except (ValueError, AttributeError):
+                    retry = 5
+                time.sleep(min(retry, 60))
+                continue
+            if not resp.ok:
+                raise RuntimeError(f"Telegram respondeu {resp.status_code}: {resp.text[:300]}")
+            return
+        raise RuntimeError("Telegram: limite de envio excedido (429)")

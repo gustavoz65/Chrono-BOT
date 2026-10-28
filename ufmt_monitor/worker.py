@@ -7,6 +7,7 @@ from datetime import date
 from google.protobuf.message import DecodeError
 
 from .classify import assess
+from .config import today as local_today
 from .dates import parse_dates
 from .extract import Fetcher
 from .gen.ufmt.v1 import worker_pb2 as pb
@@ -20,7 +21,7 @@ def _error(code: int, message: str) -> pb.Response:
 
 def _extract(req: pb.ExtractRequest) -> pb.Response:
     try:
-        today = date.fromisoformat(req.today) if req.today else date.today()
+        today = date.fromisoformat(req.today) if req.today else local_today()
     except ValueError:
         return _error(pb.Error.CODE_INVALID_REQUEST, f"today inválido: {req.today!r}")
     a = assess(req.title, req.text, today)

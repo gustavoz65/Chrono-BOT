@@ -9,6 +9,7 @@ from datetime import date
 from . import browser, llm, ocr, state
 from .classify import assess
 from .config import load_sources
+from .config import today as local_today
 from .extract import Fetcher
 from .monitor import (BASELINE_ANALYZE, Monitor, analyze, discover_cycles, listing_items, page_items,
                       page_snippets)
@@ -17,16 +18,25 @@ from .verify import merge, summary
 
 
 def cmd_run(args) -> int:
+    tg = Telegram(dry_run=args.dry_run)
+    if tg.dry_run and not args.dry_run and os.getenv("GITHUB_ACTIONS"):
+        # Sem isso o monitor "funciona" em produção sem nunca avisar ninguém.
+        print("::error::TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID não configurados nos Secrets do repositório; "
+              "nenhum aviso seria enviado.", file=sys.stderr)
+        return 1
     st = state.load(args.state)
-    monitor = Monitor(load_sources(args.sources), st, Fetcher(), Telegram(dry_run=args.dry_run))
+    monitor = Monitor(load_sources(args.sources), st, Fetcher(), tg)
     stats = monitor.run()
     state.save(st, args.state)
     print(f"Concluído: {stats}")
+    if tg.errors:
+        print(f"::error::{len(tg.errors)} envio(s) ao Telegram falharam: {tg.errors[0][:300]}", file=sys.stderr)
+        return 1
     return 0
 
 
 def cmd_check(args) -> int:
-    fetcher, today = Fetcher(), date.today()
+    fetcher, today = Fetcher(), local_today()
     report = ["# Validação das fontes UFMT", f"Data: {today.isoformat()}",
               f"Navegador: {'sim' if browser.available() else 'não'} · OCR: {'sim' if ocr.available() else 'não'}"
               f" · Groq: {'sim' if llm.enabled() else 'não'}", ""]
@@ -87,7 +97,7 @@ def cmd_check(args) -> int:
 
 
 def cmd_analyze(args) -> int:
-    today = date.fromisoformat(args.today) if args.today else date.today()
+    today = date.fromisoformat(args.today) if args.today else local_today()
     doc = Fetcher().document(args.url)
     heuristic = assess("", doc.text, today)
     heuristic.checks = doc.checks

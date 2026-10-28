@@ -92,3 +92,18 @@ def test_ocr_em_c_le_edital_escaneado():
     a = assess("", pdf_text(data), HOJE)
     assert a.status == "prevista" and a.window.label() == "10/11/2026 a 16/11/2026"
     assert a.vagas_cc == 4 and a.computacao_cuiaba
+
+
+@pytest.mark.parametrize("text", [
+    "Inscrições de 28 de dezembro a 5 de janeiro de 2027",
+    "Período de inscrições: 28/12 a 05/01/2027",
+])
+def test_periodo_que_atravessa_o_ano(text):
+    [w] = inscription_windows(text, date(2026, 12, 1))
+    assert (w.start, w.end) == (date(2026, 12, 28), date(2027, 1, 5))
+    assert w.status(date(2026, 12, 30)) == "aberta"
+
+
+def test_data_invalida_no_inicio_nao_vira_inicio_do_periodo():
+    [w] = inscription_windows("Inscrições: 31/02/2026 a 10/03/2026", HOJE)
+    assert (w.start, w.end) == (None, date(2026, 3, 10))
