@@ -91,8 +91,9 @@ sources.toml           fontes monitoradas (edite aqui)
 state/state.json       estado (o workflow faz commit só quando algo muda)
 ```
 
-Segurança: as tools que acessam a rede só aceitam endereços da UFMT (`*.ufmt.br`), então um texto
-malicioso dentro de um edital não consegue fazer a IA acessar outros sites. O conteúdo dos
+Segurança: as tools que acessam a rede só aceitam endereços da UFMT (`*.ufmt.br`, ou a lista em
+`AI_ALLOWED_HOSTS`), inclusive em cada redirecionamento e nos anexos PDF lidos pelo worker Python, então
+um texto malicioso dentro de um edital não consegue fazer a IA acessar outros sites. O conteúdo dos
 documentos é tratado como dado, nunca como instrução.
 
 ## Colocar no ar (GitHub Actions)
@@ -175,4 +176,12 @@ Depois de editar, rode **Validar fontes** para conferir.
 - O bot só lê páginas públicas. Nunca coloque credenciais da UFMT nele.
 - A classificação é conservadora, mas **confira sempre o edital oficial** antes de agir.
 - Se o site mudar de estrutura, o bot avisa ("layout da página pode ter mudado") em vez de ficar
-  em silêncio.
+  em silêncio. Se aparecerem muitas publicações novas de uma vez (links trocados), ele analisa só as
+  8 primeiras e lista o resto num aviso.
+- Sem `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` nos Secrets, a execução agendada **falha** de propósito,
+  para não rodar em silêncio.
+- Os sites da UFMT podem não responder aos runners do GitHub (fora do Brasil): se "fonte com falha"
+  aparecer sempre com `ConnectTimeout`, rode o workflow num
+  [runner self-hosted](https://docs.github.com/actions/hosting-your-own-runners) no Brasil.
+- As datas são calculadas no fuso de Cuiabá. Publicações com período encerrado há mais de 400 dias e
+  fontes removidas do `sources.toml` saem do `state.json` automaticamente.

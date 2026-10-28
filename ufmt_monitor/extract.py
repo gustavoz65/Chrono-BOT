@@ -105,7 +105,10 @@ def parse_html(html: str, base_url: str, status_code: int = 200) -> Page:
         label = LEADING_DATETIME_RE.sub("", clean(a.get_text(" "))).strip() or clean(a.get("title", ""))
         if not label or PAGINATION_RE.match(label):
             continue
-        url = normalize_url(urljoin(base_url, href))
+        try:
+            url = normalize_url(urljoin(base_url, href))
+        except ValueError:  # href malformado (ex.: "http://[x") não pode derrubar a página inteira
+            continue
         if url == normalize_url(base_url) or url in seen:
             continue
         seen.add(url)
@@ -180,19 +183,50 @@ def pdf_text(data: bytes) -> str:
     return pdf_reading(data)[0]
 
 
+def host_allowed(url: str, hosts: list[str] | None) -> bool:
+    """Sem lista, tudo vale; com lista, só o domínio ou subdomínios dele (ufmt.br → www.ufmt.br)."""
+    if not hosts:
+        return True
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    return parts.scheme in ("http", "https") and any(host == h or host.endswith("." + h) for h in hosts)
+
+
 class Fetcher:
-    def __init__(self, timeout: int = 30, delay: float = 1.5, session: requests.Session | None = None):
+    MAX_REDIRECTS = 10
+
+    def __init__(self, timeout: int = 30, delay: float = 1.5, session: requests.Session | None = None,
+                 allowed_hosts: list[str] | None = None):
         self.session = session or make_session()
         self.timeout = timeout
         self.delay = delay
+        self.allowed_hosts = allowed_hosts
         self._last = 0.0
+
+    def _check_host(self, url: str) -> None:
+        if not host_allowed(url, self.allowed_hosts):
+            raise ValueError(f"domínio não permitido: {urlsplit(url).hostname} "
+                             f"(permitidos: {', '.join(self.allowed_hosts or [])})")
 
     def _get(self, url: str, verify: bool = True) -> requests.Response:
         wait = self.delay - (time.monotonic() - self._last)
         if wait > 0:
             time.sleep(wait)
         try:
-            resp = self.session.get(url, timeout=self.timeout, verify=verify)
+            self._check_host(url)
+            if not self.allowed_hosts:
+                resp = self.session.get(url, timeout=self.timeout, verify=verify)
+            else:
+                # Segue os redirects à mão para conferir o domínio de cada salto.
+                resp = self.session.get(url, timeout=self.timeout, verify=verify, allow_redirects=False)
+                for _ in range(self.MAX_REDIRECTS):
+                    if not resp.is_redirect:
+                        break
+                    url = urljoin(resp.url, resp.headers["location"])
+                    self._check_host(url)
+                    resp = self.session.get(url, timeout=self.timeout, verify=verify, allow_redirects=False)
+                else:
+                    raise requests.TooManyRedirects(f"mais de {self.MAX_REDIRECTS} redirecionamentos")
         finally:
             self._last = time.monotonic()
         resp.raise_for_status()
@@ -212,7 +246,9 @@ class Fetcher:
     def render(self, url: str, discover: bool = False) -> Page:
         if not browser.available():
             raise RuntimeError("navegador indisponível (instale com `npm ci` em browser/)")
+        self._check_host(url)
         data = browser.render(url, discover)
+        self._check_host(data["url"] or url)
         page = parse_html(data["html"], data["url"] or url)
         page.option_urls = {o["value"]: normalize_url(o["url"]) for o in data.get("options", [])}
         return page
@@ -228,6 +264,7 @@ class Fetcher:
         return page, check
 
     def document(self, url: str, verify: bool = True, max_pdfs: int = 3) -> Document:
+        self._check_host(url)
         page = self.page(url, verify)
         checks = list(page.checks)
         if not checks:
@@ -235,7 +272,7 @@ class Fetcher:
             checks.append(check)
         texts, sources = [page.text], [url]
         if page.links:
-            pdfs = [link for link in page.links if link.is_pdf]
+            pdfs = [link for link in page.links if link.is_pdf and host_allowed(link.url, self.allowed_hosts)]
             priority = lambda link: 0 if re.search(r"edital|cronograma|retifica|aviso", fold(link.text + link.url)) else 1  # noqa: E731
             for link in sorted(pdfs, key=priority)[:max_pdfs]:
                 try:

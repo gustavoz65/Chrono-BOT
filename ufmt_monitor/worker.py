@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from datetime import date
 
 from google.protobuf.message import DecodeError
 
 from .classify import assess
+from .config import today as local_today
 from .dates import parse_dates
-from .extract import Fetcher
+from .extract import Fetcher, host_allowed
 from .gen.ufmt.v1 import worker_pb2 as pb
 
 RESULT = {True: "ok", False: "falhou", None: "nao_executada"}
+
+
+def allowed_hosts() -> list[str]:
+    # Mesma lista do agente Go: quem pede FetchRequest é a IA, que lê texto de terceiros.
+    raw = os.getenv("AI_ALLOWED_HOSTS", "")
+    return [h.strip().lower() for h in raw.split(",") if h.strip()] or ["ufmt.br"]
 
 
 def _error(code: int, message: str) -> pb.Response:
@@ -20,7 +28,7 @@ def _error(code: int, message: str) -> pb.Response:
 
 def _extract(req: pb.ExtractRequest) -> pb.Response:
     try:
-        today = date.fromisoformat(req.today) if req.today else date.today()
+        today = date.fromisoformat(req.today) if req.today else local_today()
     except ValueError:
         return _error(pb.Error.CODE_INVALID_REQUEST, f"today inválido: {req.today!r}")
     a = assess(req.title, req.text, today)
@@ -38,6 +46,8 @@ def _extract(req: pb.ExtractRequest) -> pb.Response:
 def _fetch(req: pb.FetchRequest, fetcher: Fetcher) -> pb.Response:
     if not req.url.startswith(("http://", "https://")):
         return _error(pb.Error.CODE_INVALID_REQUEST, "FetchRequest.url precisa ser http(s)")
+    if not host_allowed(req.url, allowed_hosts()):
+        return _error(pb.Error.CODE_INVALID_REQUEST, f"domínio não permitido: {req.url}")
     try:
         doc = fetcher.document(req.url)
     except Exception as exc:
@@ -56,7 +66,7 @@ def handle(data: bytes, fetcher: Fetcher | None = None) -> bytes:
     if kind == "extract":
         response = _extract(request.extract)
     elif kind == "fetch":
-        response = _fetch(request.fetch, fetcher or Fetcher())
+        response = _fetch(request.fetch, fetcher or Fetcher(allowed_hosts=allowed_hosts()))
     else:
         response = _error(pb.Error.CODE_UNSUPPORTED, "este worker atende ExtractRequest e FetchRequest")
     return response.SerializeToString()

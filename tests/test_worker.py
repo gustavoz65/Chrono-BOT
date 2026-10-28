@@ -53,3 +53,9 @@ def test_executavel_fala_protobuf_pelo_stdin():
     res = pb.Response()
     res.ParseFromString(proc.stdout)
     assert res.extract.status == "aberta"
+
+
+def test_fetch_recusa_dominio_fora_da_ufmt(fixture_text):
+    url = "https://evil.example.com/edital"
+    res = call(pb.Request(fetch=pb.FetchRequest(url=url)), FakeFetcher({url: fixture_text("edital_2026.html")}))
+    assert res.error.code == pb.Error.CODE_INVALID_REQUEST and "não permitido" in res.error.message

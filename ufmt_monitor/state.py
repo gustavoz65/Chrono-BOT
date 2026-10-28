@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -31,4 +32,7 @@ def load(path: Path | str = DEFAULT_PATH) -> dict[str, Any]:
 def save(state: dict[str, Any], path: Path | str = DEFAULT_PATH) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # Grava num temporário e troca: um processo morto no meio não deixa JSON truncado.
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, path)

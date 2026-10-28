@@ -187,7 +187,17 @@ func define[In, Out any, P interface {
 }
 
 func defineTools(g *genkit.Genkit, runner workers.Runner, hosts []string, client *http.Client) *toolset {
-	t := &toolset{runner: runner, hosts: hosts, client: client}
+	t := &toolset{runner: runner, hosts: hosts}
+	// Sem isto, uma página da UFMT que redireciona para outro domínio fura a lista de domínios.
+	c := *client
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("redirecionamentos demais")
+		}
+		_, err := t.allowed(req.URL.String())
+		return err
+	}
+	t.client = &c
 
 	t.refs = append(t.refs, define(g, "buscar_no_documento",
 		"Procura termos no documento em análise e devolve trechos ao redor de cada ocorrência.",

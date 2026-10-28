@@ -196,6 +196,40 @@ func TestNormalizeNaoConfiaNoModelo(t *testing.T) {
 	}
 }
 
+func TestNormalizeDescartaPeriodoPelaMetade(t *testing.T) {
+	cases := []Output{
+		{InscricaoInicio: "2026-13-45", InscricaoFim: "2026-11-30", Status: "aberta", VagasCC: 5000000000},
+		{InscricaoInicio: "2026-11-30", InscricaoFim: "2026-10-01", Status: "aberta", VagasCC: -1},
+	}
+	for _, o := range cases {
+		a := normalize(&o, today)
+		if a.InscricaoInicio != "" || a.InscricaoFim != "" || a.Status != "indeterminada" || a.VagasCienciaComputacaoCuiaba != -1 {
+			t.Errorf("normalize(%+v) = %+v", o, a)
+		}
+	}
+	if a := normalize(&Output{InscricaoFim: "2026-10-30", VagasCC: 4}, today); a.Status != "aberta" || a.VagasCienciaComputacaoCuiaba != 4 {
+		t.Errorf("só o fim, válido, continua valendo: %+v", a)
+	}
+}
+
+func TestDownloadNaoSegueRedirectParaForaDaUFMT(t *testing.T) {
+	evil := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("%PDF")) }))
+	defer evil.Close()
+	ufmt := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, evil.URL, http.StatusFound) // evil responde em 127.0.0.1
+	}))
+	defer ufmt.Close()
+	g := genkit.Init(context.Background())
+	ts := defineTools(g, &fakeRunner{}, []string{"localhost"}, http.DefaultClient)
+	local := strings.Replace(ufmt.URL, "127.0.0.1", "localhost", 1)
+	if _, err := ts.download(context.Background(), local); err == nil || !strings.Contains(err.Error(), "não permitido") {
+		t.Fatalf("redirect para host fora da lista deveria falhar, err=%v", err)
+	}
+	if http.DefaultClient.CheckRedirect != nil {
+		t.Error("não pode alterar o client recebido")
+	}
+}
+
 func TestDocumentSearchIgnoraAcentoEDevolvePosicao(t *testing.T) {
 	d := NewDocument(edital)
 	got := d.Search([]string{"INSCRICOES"}, 10, 5)

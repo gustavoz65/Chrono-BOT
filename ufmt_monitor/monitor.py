@@ -13,6 +13,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from . import llm
 from .classify import PRECURSORES, Assessment, assess, is_graduado, is_important, process_kind
 from .config import Source
+from .config import today as local_today
 from .dates import DATE_RE, fold, inscription_windows, overall_status
 from .extract import Fetcher, Link, Page, normalize_url
 from .notify import Telegram, esc
@@ -24,6 +25,11 @@ MAX_ITEMS_PER_SOURCE = 500
 MAX_SNIPPETS_PER_SOURCE = 300
 BASELINE_ANALYZE = 3
 CLOSING_SOON_DAYS = 2
+# Acima disso numa execução é quase certo que o site mudou os links: analisar tudo (rede, OCR, IA)
+# estoura o tempo do job, que morre sem salvar o estado e repete o mesmo na próxima hora.
+MAX_NEW_ANALYZE = 8
+# Publicações cujo período (ou primeira aparição) é mais antigo que isso saem do estado.
+PUBLICATION_TTL_DAYS = 400
 
 
 @dataclass
@@ -226,9 +232,10 @@ class Monitor:
         self.state = state
         self.fetcher = fetcher
         self.tg = telegram
-        self.today = today or date.today()
-        self.heartbeat_days = int(os.getenv("HEARTBEAT_DAYS", "7"))
+        self.today = today or local_today()
+        self.heartbeat_days = int(os.getenv("HEARTBEAT_DAYS") or 7)
         self.listing_checks: dict[str, Check] = {}
+        self.ok_ids: set[str] = set()
 
     def run(self) -> dict[str, int]:
         stats = {"ok": 0, "failed": 0, "new_items": 0, "alerts": 0}
@@ -253,10 +260,11 @@ class Monitor:
                 self._failure(source, f"{type(exc).__name__}: {exc}")
                 continue
             stats["ok"] += 1
+            self.ok_ids.add(source.id)
             self._recovered(source)
             first_time = source.id not in self.state["sources"] or "items" not in self.state["sources"][source.id]
             if first_time:
-                pubs = self._baseline(source, page, items)
+                pubs = self._baseline(source, page, items, announce=not first_run)
                 if first_run:
                     baseline_pubs += pubs
             else:
@@ -266,6 +274,7 @@ class Monitor:
                 queue += [s for s in self._followed() if s.id not in done]
 
         stats["alerts"] += self._transitions()
+        self._prune()
         if baseline_pubs:
             self._baseline_summary(baseline_pubs)
         elif self._heartbeat_due():
@@ -289,7 +298,9 @@ class Monitor:
                 snips.append(s)
         src["snippets"] = snips[-MAX_SNIPPETS_PER_SOURCE:]
 
-    def _baseline(self, source: Source, page: Page, items: list[Link]) -> list[Publication]:
+    def _baseline(self, source: Source, page: Page, items: list[Link], announce: bool = False) -> list[Publication]:
+        """Registra o que já existe sem avisar. Fora da 1ª execução (fonte nova no sources.toml, ciclo
+        seguido depois), uma inscrição já aberta ainda vira aviso: só o resto entra em silêncio."""
         log.info("linha de base: %s (%d itens)", source.id, len(items))
         snippets = page_snippets(page) if source.kind == "page" else []
         self._store(source, items, snippets)
@@ -300,14 +311,26 @@ class Monitor:
         pubs = [analyze(self.fetcher, link, source, self.today, self.listing_checks.get(source.id)) for link in picks]
         for pub in pubs:
             _record(self.state, pub, self.today)
+            if announce and pub.assessment.status == "aberta":
+                self.tg.send(new_publication_message(pub))
         return pubs
+
+    def _prune(self) -> None:
+        keep = {s.id for s in self.sources} | {s.id for s in self._followed()}
+        for sid in [sid for sid in self.state["sources"] if sid not in keep]:
+            del self.state["sources"][sid]
+        cutoff = (self.today - timedelta(days=PUBLICATION_TTL_DAYS)).isoformat()
+        pubs = self.state["publications"]
+        for url in [u for u, r in pubs.items()
+                    if (r.get("end") or r.get("start") or r.get("first_seen") or cutoff) < cutoff]:
+            del pubs[url]
 
     def _diff(self, source: Source, page: Page, items: list[Link]) -> int:
         src = self._src(source)
         known = src.get("items", {})
         new = [link for link in items if link.url not in known]
         routine: list[Publication] = []
-        for link in new:
+        for link in new[:MAX_NEW_ANALYZE]:
             pub = analyze(self.fetcher, link, source, self.today, self.listing_checks.get(source.id))
             _record(self.state, pub, self.today)
             if is_important(pub.title, pub.assessment.status):
@@ -316,6 +339,8 @@ class Monitor:
                 routine.append(pub)
         if routine:
             self.tg.send(routine_digest_message(source, routine), silent=True)
+        if len(new) > MAX_NEW_ANALYZE:
+            self.tg.send(self._flood_message(source, new[MAX_NEW_ANALYZE:]))
         snippets = page_snippets(page) if source.kind == "page" else []
         old_snips = set(src.get("snippets", []))
         new_snips = [s for s in snippets if s not in old_snips]
@@ -323,6 +348,16 @@ class Monitor:
             self.tg.send(self._snippet_message(source, new_snips))
         self._store(source, items, snippets)
         return len(new) + len(new_snips)
+
+    def _flood_message(self, source: Source, skipped: list[Link]) -> str:
+        lines = [f"⚠️ <b>{len(skipped)} publicação(ões) novas a mais não analisadas — UFMT</b>",
+                 f"<b>Fonte:</b> {esc(source.name)}",
+                 "<i>Muitas publicações novas de uma vez: provavelmente o site mudou os links. "
+                 "Confira a listagem.</i>", ""]
+        lines += [f"• {esc(link.text)}\n  {esc(link.url)}" for link in skipped[:15]]
+        if len(skipped) > 15:
+            lines.append(f"… e mais {len(skipped) - 15}.")
+        return "\n".join(lines)
 
     def _snippet_message(self, source: Source, snippets: list[str]) -> str:
         lines = ["🔎 <b>Texto novo sobre Admissão de Graduados — UFMT</b>", "",
@@ -425,6 +460,9 @@ class Monitor:
                     _record(self.state, pub, self.today)
             except Exception as exc:
                 log.warning("não consegui abrir a listagem do ciclo %s: %s", cycle.label, exc)
+                # Linha de base vazia: quando a listagem abrir, as publicações do ciclo novo viram
+                # aviso, em vez de entrarem em silêncio como linha de base.
+                self._store(child, [], [])
             self._follow(source, cycle)
             self.tg.send(new_cycle_message(cycle, pubs))
         return len(new)
@@ -519,7 +557,7 @@ class Monitor:
         tracked = [r for r in self.state["publications"].values() if r.get("modalidade") == "admissao_graduados"]
         latest = max(tracked, key=lambda r: r.get("end") or r.get("start") or "", default=None)
         lines = ["💓 <b>Monitor UFMT funcionando</b>",
-                 f"Fontes OK nesta execução: {stats['ok']}/{len(self.sources)}."]
+                 f"Fontes OK nesta execução: {sum(s.id in self.ok_ids for s in self.sources)}/{len(self.sources)}."]
         checks = list(self.listing_checks.values())
         if checks:
             confirmed = sum(1 for c in checks if c.ok)

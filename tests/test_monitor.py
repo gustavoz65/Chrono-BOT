@@ -251,3 +251,69 @@ def test_ciclo_novo_usa_url_real_descoberta_no_navegador(fixture_text):
     Monitor([LISTING, HOME], st, FakeFetcher(pages, {LIST_URL: rendered}), tg, date(2026, 10, 23)).run()
     assert len(tg.sent) == 1 and real.replace("&", "&amp;") in tg.sent[0]
     assert run(pages, st).sent == []
+
+
+def test_ciclo_novo_com_listagem_fora_do_ar_avisa_quando_ela_voltar(fixture_text, monkeypatch):
+    monkeypatch.setenv("HEARTBEAT_DAYS", "0")
+    st = started(fixture_text)
+    listing = fixture_text("listagem.html").replace(
+        '<option value="244" selected>', '<option value="251">Admissão de Graduado 2026/2</option><option value="244" selected>')
+    pages = make_pages(fixture_text, **{
+        LIST_URL: listing,
+        PUB(9300): "<html><body><p>Admissão de Graduados 2026/2. Inscrições de 20/10/2026 a 30/10/2026.</p></body></html>",
+    })
+    tg = run(pages, st)
+    assert len(tg.sent) == 1 and "Ainda não consegui ler publicações" in tg.sent[0]
+    pages[CAT(251)] = child_listing((PUB(9300), "Edital nº 09/2026 - Admissão de Graduado 2026/2", "22/10/2026"))
+    tg = run(pages, st)
+    assert any("INSCRIÇÕES ABERTAS" in m for m in tg.sent)
+
+
+def test_enxurrada_de_links_novos_nao_analisa_tudo(fixture_text, monkeypatch):
+    monkeypatch.setenv("HEARTBEAT_DAYS", "0")
+    st = started(fixture_text)
+    listing = fixture_text("listagem.html")
+    for n in range(30):
+        listing = card(listing, PUB(20000 + n), f"Admissão de Graduados 2026/1 - Resultado da etapa {n}")
+    pages = make_pages(fixture_text, **{LIST_URL: listing})
+    fetcher = FakeFetcher(pages)
+    tg = Telegram(dry_run=True)
+    Monitor([LISTING, HOME], st, fetcher, tg, date(2026, 10, 23)).run()
+    assert sum(u.startswith(PUB(2)) for u in fetcher.requested) <= 8
+    assert any("não analisadas" in m for m in tg.sent)
+    assert run(pages, st).sent == []
+
+
+def test_heartbeat_conta_so_as_fontes_configuradas(fixture_text):
+    st = started(fixture_text)
+    tg = run(make_pages(fixture_text), st, today=date(2026, 11, 5))
+    assert any("Fontes OK nesta execução: 2/2." in m for m in tg.sent)
+
+
+def test_fonte_nova_com_inscricao_aberta_avisa(fixture_text, monkeypatch):
+    monkeypatch.setenv("HEARTBEAT_DAYS", "0")
+    st = started(fixture_text)
+    nova_url = "https://www.ufmt.br/unidade/ingresso/publicacoes?category=300&id=61&page=1"
+    nova = Source("nova", "Fonte nova", nova_url, kind="listing", modalidade="admissao_graduados")
+    pages = make_pages(fixture_text, **{
+        nova_url: child_listing((PUB(9500), "Edital - Admissão de Graduado 2026/2", "20/10/2026"),
+                                (PUB(9501), "Admissão de Graduado 2026/2 - Resultado", "21/10/2026")),
+        PUB(9500): "<html><body><p>Admissão de Graduados. Inscrições de 20/10/2026 a 30/10/2026.</p></body></html>",
+        PUB(9501): "<html><body><p>Resultado preliminar.</p></body></html>",
+    })
+    tg = run(pages, st, sources=(LISTING, HOME, nova))
+    assert len(tg.sent) == 1 and "INSCRIÇÕES ABERTAS" in tg.sent[0] and "2026/2" in tg.sent[0]
+    assert run(pages, st, sources=(LISTING, HOME, nova)).sent == []
+
+
+def test_estado_poda_fontes_removidas_e_publicacoes_antigas(fixture_text):
+    st = started(fixture_text)
+    st["sources"]["removida"] = {"failures": 9, "items": {}}
+    st["publications"]["https://www.ufmt.br/velha"] = {"end": "2024-01-10", "notified": []}
+    st["publications"]["https://www.ufmt.br/sem-data"] = {"first_seen": "2024-01-10", "notified": []}
+    run(make_pages(fixture_text), st)
+    assert "removida" not in st["sources"]
+    assert "https://www.ufmt.br/velha" not in st["publications"]
+    assert "https://www.ufmt.br/sem-data" not in st["publications"]
+    assert PUB(9010) in st["publications"]
+    assert any("@" in sid for sid in st["sources"]), "ciclos seguidos ficam"
