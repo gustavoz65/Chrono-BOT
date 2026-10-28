@@ -28,6 +28,8 @@ CLOSING_SOON_DAYS = 2
 # Acima disso numa execução é quase certo que o site mudou os links: analisar tudo (rede, OCR, IA)
 # estoura o tempo do job, que morre sem salvar o estado e repete o mesmo na próxima hora.
 MAX_NEW_ANALYZE = 8
+# Publicações cujo período (ou primeira aparição) é mais antigo que isso saem do estado.
+PUBLICATION_TTL_DAYS = 400
 
 
 @dataclass
@@ -262,7 +264,7 @@ class Monitor:
             self._recovered(source)
             first_time = source.id not in self.state["sources"] or "items" not in self.state["sources"][source.id]
             if first_time:
-                pubs = self._baseline(source, page, items)
+                pubs = self._baseline(source, page, items, announce=not first_run)
                 if first_run:
                     baseline_pubs += pubs
             else:
@@ -272,6 +274,7 @@ class Monitor:
                 queue += [s for s in self._followed() if s.id not in done]
 
         stats["alerts"] += self._transitions()
+        self._prune()
         if baseline_pubs:
             self._baseline_summary(baseline_pubs)
         elif self._heartbeat_due():
@@ -295,7 +298,9 @@ class Monitor:
                 snips.append(s)
         src["snippets"] = snips[-MAX_SNIPPETS_PER_SOURCE:]
 
-    def _baseline(self, source: Source, page: Page, items: list[Link]) -> list[Publication]:
+    def _baseline(self, source: Source, page: Page, items: list[Link], announce: bool = False) -> list[Publication]:
+        """Registra o que já existe sem avisar. Fora da 1ª execução (fonte nova no sources.toml, ciclo
+        seguido depois), uma inscrição já aberta ainda vira aviso: só o resto entra em silêncio."""
         log.info("linha de base: %s (%d itens)", source.id, len(items))
         snippets = page_snippets(page) if source.kind == "page" else []
         self._store(source, items, snippets)
@@ -306,7 +311,19 @@ class Monitor:
         pubs = [analyze(self.fetcher, link, source, self.today, self.listing_checks.get(source.id)) for link in picks]
         for pub in pubs:
             _record(self.state, pub, self.today)
+            if announce and pub.assessment.status == "aberta":
+                self.tg.send(new_publication_message(pub))
         return pubs
+
+    def _prune(self) -> None:
+        keep = {s.id for s in self.sources} | {s.id for s in self._followed()}
+        for sid in [sid for sid in self.state["sources"] if sid not in keep]:
+            del self.state["sources"][sid]
+        cutoff = (self.today - timedelta(days=PUBLICATION_TTL_DAYS)).isoformat()
+        pubs = self.state["publications"]
+        for url in [u for u, r in pubs.items()
+                    if (r.get("end") or r.get("start") or r.get("first_seen") or cutoff) < cutoff]:
+            del pubs[url]
 
     def _diff(self, source: Source, page: Page, items: list[Link]) -> int:
         src = self._src(source)
