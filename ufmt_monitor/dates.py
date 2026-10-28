@@ -95,19 +95,29 @@ def find_mentions(folded: str) -> list[Mention]:
     return mentions
 
 
-def _to_dates(mentions: list[Mention], default_year: int | None) -> list[date]:
-    out: list[date] = []
+def _resolve(mentions: list[Mention], default_year: int | None) -> list[date | None]:
+    """Uma data por menção (None quando inválida), para não desalinhar data e trecho."""
+    out: list[date | None] = []
     for i, m in enumerate(mentions):
         year = m.year
         if year is None:
             year = next((n.year for n in mentions[i + 1:] if n.year), None) or default_year
-        if year is None:
-            continue
         try:
-            out.append(date(year, m.month, m.day))
+            out.append(date(year, m.month, m.day) if year else None)
         except ValueError:
-            continue
+            out.append(None)
     return out
+
+
+def _to_dates(mentions: list[Mention], default_year: int | None) -> list[date]:
+    return [d for d in _resolve(mentions, default_year) if d]
+
+
+def _previous_year(d: date) -> date:
+    try:
+        return d.replace(year=d.year - 1)
+    except ValueError:  # 29/02
+        return d
 
 
 def parse_dates(text: str, default_year: int | None = None) -> list[date]:
@@ -135,16 +145,21 @@ def inscription_windows(text: str, today: date | None = None) -> list[Window]:
         near_text = folded[kw.end():near[0].start]
         if NOT_WINDOW_RE.search(near_text):
             continue
-        dates = _to_dates(near[:2], default_year)
-        if not dates:
+        valid = [(m, d) for m, d in zip(near[:2], _resolve(near[:2], default_year)) if d]
+        if not valid:
             continue
-        before = folded[kw.end():near[0].start]
-        if len(dates) >= 2 and dates[0] <= dates[1]:
-            win = Window(dates[0], dates[1], text[kw.start():near[1].end].strip())
-        elif re.search(r"\bate\b", before):
-            win = Window(None, dates[0], text[kw.start():near[0].end].strip())
+        # "28 de dezembro a 5 de janeiro de 2027": o ano herdado da 2ª data vale para a 1ª só
+        # se a ordem fizer sentido; senão a 1ª é do ano anterior.
+        if len(valid) == 2 and valid[0][1] > valid[1][1] and valid[0][0].year is None:
+            valid[0] = (valid[0][0], _previous_year(valid[0][1]))
+        (first, d1), last = valid[0], valid[-1]
+        before = folded[kw.end():first.start]
+        if len(valid) == 2 and d1 <= last[1]:
+            win = Window(d1, last[1], text[kw.start():last[0].end].strip())
+        elif re.search(r"\bate\b", before) or first is not near[0]:
+            win = Window(None, d1, text[kw.start():first.end].strip())
         else:
-            win = Window(dates[0], None, text[kw.start():near[0].end].strip())
+            win = Window(d1, None, text[kw.start():first.end].strip())
         key = (win.start, win.end)
         if key not in seen:
             seen.add(key)
